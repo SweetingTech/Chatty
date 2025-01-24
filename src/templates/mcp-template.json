@@ -1,0 +1,22 @@
+{
+  "schema": "1.0.0",
+  "type": "mcp",
+  "metadata": {
+    "name": "",
+    "description": "",
+    "version": "1.0.0",
+    "author": "",
+    "tags": []
+  },
+  "configuration": {
+    "model": "",
+    "context": [],
+    "connections": [],
+    "apis": []
+  },
+  "implementation": {
+    "preprocessors": [],
+    "postprocessors": [],
+    "errorHandlers": []
+  }
+}

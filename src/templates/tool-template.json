@@ -1,0 +1,22 @@
+{
+  "schema": "1.0.0",
+  "type": "tool",
+  "metadata": {
+    "name": "",
+    "description": "",
+    "version": "1.0.0",
+    "author": "",
+    "tags": []
+  },
+  "configuration": {
+    "type": "function" | "api" | "cli",
+    "config": {},
+    "permissions": [],
+    "requirements": []
+  },
+  "implementation": {
+    "code": "",
+    "dependencies": [],
+    "exports": []
+  }
+}

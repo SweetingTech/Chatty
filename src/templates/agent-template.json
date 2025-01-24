@@ -1,0 +1,28 @@
+{
+  "schema": "1.0.0",
+  "type": "agent",
+  "metadata": {
+    "name": "",
+    "description": "",
+    "version": "1.0.0",
+    "author": "",
+    "tags": []
+  },
+  "configuration": {
+    "tools": [],
+    "memory": {
+      "type": "short_term" | "long_term",
+      "capacity": 1000
+    },
+    "behavior": {
+      "temperature": 0.7,
+      "maxTokens": 4096,
+      "stopSequences": []
+    }
+  },
+  "implementation": {
+    "initialization": "",
+    "handlers": {},
+    "cleanup": ""
+  }
+}
