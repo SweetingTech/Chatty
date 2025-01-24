@@ -7,7 +7,7 @@ interface SaveButtonProps {
   disabled?: boolean;
 }
 
-export default function SaveButton({ onSave, hasChanges, disabled = false }: SaveButtonProps) {
+export function SaveButton({ onSave, hasChanges, disabled = false }: SaveButtonProps) {
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
 
   const handleClick = async () => {

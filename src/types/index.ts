@@ -1,4 +1,23 @@
 import { z } from 'zod';
+import { ServiceStatusType } from '../components/StatusCard';
+
+export type LLMProvider = 'lm-studio' | 'openai' | 'claude' | 'none';
+
+export interface LLMConfig {
+  provider: LLMProvider;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  enabled: boolean;
+  isDefault?: boolean;
+  apiKey?: string;
+}
+
+export interface ServiceStatus {
+  weaviate: ServiceStatusType;
+  chromadb: ServiceStatusType;
+  lmStudio: ServiceStatusType;
+}
 
 export interface Settings {
   lmStudioUrl: string;
@@ -7,6 +26,7 @@ export interface Settings {
   claudeKey: string;
   theme: 'light' | 'dark';
   braveApiKey?: string;
+  defaultLLMProvider?: LLMProvider;
 }
 
 export interface ChatMessage {
@@ -32,13 +52,17 @@ export interface EmbeddedDocument {
   createdAt: number;
 }
 
-export type LLMProvider = 'lm-studio' | 'openai' | 'claude' | 'none';
+export interface DocumentMetadata {
+  createdAt: number;
+  type: string;
+  tags?: string[];
+}
 
-export interface AgentLLMConfig {
-  provider: LLMProvider;
-  model?: string;
-  temperature?: number;
-  maxTokens?: number;
+export interface Document {
+  title: string;
+  content: string;
+  vector?: number[];
+  metadata: DocumentMetadata;
 }
 
 export interface AgentPersonality {
@@ -53,7 +77,7 @@ export interface Agent {
   name: string;
   description: string;
   tools: string[];
-  llmConfig: AgentLLMConfig;
+  llmConfig: LLMConfig;
   personality?: AgentPersonality;
   config: Record<string, unknown>;
   type: 'router' | 'builder' | 'chat' | 'custom';
@@ -115,11 +139,14 @@ export interface BuildPlan {
 }
 
 // Zod schemas for validation
-export const agentLLMConfigSchema = z.object({
+export const llmConfigSchema = z.object({
   provider: z.enum(['lm-studio', 'openai', 'claude', 'none']),
   model: z.string().optional(),
   temperature: z.number().min(0).max(1).optional(),
   maxTokens: z.number().positive().optional(),
+  enabled: z.boolean(),
+  isDefault: z.boolean().optional(),
+  apiKey: z.string().optional(),
 });
 
 export const agentPersonalitySchema = z.object({
@@ -134,7 +161,7 @@ export const agentSchema = z.object({
   name: z.string(),
   description: z.string(),
   tools: z.array(z.string()),
-  llmConfig: agentLLMConfigSchema,
+  llmConfig: llmConfigSchema,
   personality: agentPersonalitySchema.optional(),
   config: z.record(z.unknown()),
   type: z.enum(['router', 'builder', 'chat', 'custom']),

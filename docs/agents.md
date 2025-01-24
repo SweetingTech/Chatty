@@ -15,6 +15,10 @@ This document describes the built-in agents and their capabilities in the Multi-
   - Message history management
   - Context tracking
   - File attachment handling
+  - MCP Tools:
+    - Filesystem MCP for conversation storage
+    - Browser MCP for web content
+    - API MCPs for external services
 - **Capabilities**:
   - Multi-turn conversations
   - Context-aware responses
@@ -32,6 +36,9 @@ This document describes the built-in agents and their capabilities in the Multi-
   - Request analysis
   - Agent matching
   - Build request generation
+  - MCP Tools:
+    - API MCPs for service health checks
+    - Database MCPs for agent registry
 - **Capabilities**:
   - Request classification
   - Agent selection
@@ -49,6 +56,9 @@ This document describes the built-in agents and their capabilities in the Multi-
   - Template management
   - Configuration validation
   - Component creation
+  - MCP Tools:
+    - Git MCP for version control
+    - Filesystem MCP for component creation
 - **Capabilities**:
   - Plan creation
   - Approval management
@@ -66,6 +76,9 @@ This document describes the built-in agents and their capabilities in the Multi-
   - Task scheduler
   - Workflow engine
   - Status monitoring
+  - MCP Tools:
+    - Docker MCP for containerization
+    - Kubernetes MCP for orchestration
 - **Capabilities**:
   - Task prioritization
   - Sequential execution
@@ -78,6 +91,9 @@ This document describes the built-in agents and their capabilities in the Multi-
   - API connectors
   - Data transformers
   - Authentication manager
+  - MCP Tools:
+    - Database MCPs for data storage
+    - API MCPs for service integration
 - **Capabilities**:
   - API communication
   - Data format conversion
@@ -90,6 +106,9 @@ This document describes the built-in agents and their capabilities in the Multi-
   - Feedback collector
   - Performance analyzer
   - Model tuner
+  - MCP Tools:
+    - Vector Database MCPs for embeddings
+    - Analytics MCPs for metrics
 - **Capabilities**:
   - Pattern recognition
   - Performance optimization
@@ -138,6 +157,7 @@ interface Agent {
   config: Record<string, unknown>;
   type: 'router' | 'builder' | 'chat' | 'custom';
   requires_approval?: boolean;
+  mcp_tools?: string[]; // List of MCP tools the agent can use
 }
 ```
 
@@ -152,7 +172,8 @@ const agentConfig = {
   llmConfig: {
     provider: "openai",
     model: "gpt-4"
-  }
+  },
+  mcp_tools: ["filesystem", "browser"] // MCPs this agent can use
 };
 ```
 
@@ -191,21 +212,25 @@ const agent = await createAgent({
    - Minimal tool selection
    - Appropriate permissions
    - Error handling
+   - Careful MCP tool selection
 
 2. Configuration
    - Validate settings
    - Test interactions
    - Document requirements
    - Monitor performance
+   - Verify MCP permissions
 
 3. Security
    - Implement approvals
    - Validate inputs
    - Audit actions
    - Regular reviews
+   - MCP access control
 
 4. Maintenance
    - Update configurations
    - Monitor performance
    - Review logs
    - Update documentation
+   - Check MCP health

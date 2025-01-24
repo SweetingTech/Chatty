@@ -3,9 +3,9 @@ import { useAppStore } from '../store';
 import { ChatSidebar } from '../components/ChatSidebar';
 import { ChatMessage } from '../components/ChatMessage';
 import { ChatInput } from '../components/ChatInput';
-import { chromadb } from '../lib/chromadb';
 import { mcp } from '../lib/mcp';
 import { setupRootMCPs } from '../lib/mcp/providers';
+import { chromadb } from '../lib/chromadb';
 
 export function ChatPage() {
   const {
@@ -14,12 +14,12 @@ export function ChatPage() {
     addChatSession,
     updateChatSession,
     settings,
+    serviceStatus,
   } = useAppStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mcpRef = useRef<ReturnType<typeof setupRootMCPs>>();
 
   useEffect(() => {
-    chromadb.init().catch(console.error);
     // Initialize root MCPs
     mcpRef.current = setupRootMCPs();
   }, []);
@@ -56,8 +56,14 @@ export function ChatPage() {
       updatedAt: Date.now(),
     });
 
-    // Save to ChromaDB
-    await chromadb.saveChatSession(currentChatId!, updatedMessages);
+    // Only save to ChromaDB if it's online
+    if (serviceStatus.chromadb === 'online') {
+      try {
+        await chromadb.saveChatSession(currentChatId!, updatedMessages);
+      } catch (error) {
+        console.error('Failed to save chat session to ChromaDB:', error);
+      }
+    }
 
     // Route through appropriate MCP based on settings
     let selectedMCP = mcpRef.current?.lmStudioMCP;
@@ -69,7 +75,7 @@ export function ChatPage() {
 
     if (selectedMCP) {
       // Add to MCP context
-      mcp.updateContext(selectedMCP.id, [...selectedMCP.context, content]);
+      mcp.updateContext(selectedMCP.id, { context: [...selectedMCP.context, content] });
       
       // Get response through MCP
       const mcpResponse = mcp.addResponse(selectedMCP.id, 'This is a placeholder response. LLM integration coming soon...');

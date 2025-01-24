@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Multi-LLM application is built with a modular, agent-based architecture that enables flexible integration of multiple language models and tools. This document outlines the core architectural components and their interactions.
+The Multi-LLM application is built with a modular, agent-based architecture that enables flexible integration of multiple language models ~~and tools~~ **tools, and Model Context Protocol (MCP) servers**. This document outlines the core architectural components and their interactions.
 
 ## Core Components
 
@@ -14,18 +14,30 @@ The Multi-LLM application is built with a modular, agent-based architecture that
   - LLM provider selection
   - Context management
   - Message history
+  - **Uses MCPs for:**
+    - File operations
+    - Web content access
+    - External services
 
 - **Router Agent**: Request routing and delegation
   - Request analysis
   - Agent selection
   - Build request generation
   - Workflow initiation
+  - **Uses MCPs for:**
+    - Service health checks
+    - Load balancing
+    - Request routing
 
 - **Builder Agent**: System extension
   - Component creation
   - Template management
   - Configuration validation
   - Approval workflow
+  - **Uses MCPs for:**
+    - Version control
+    - Component generation
+    - Testing
 
 #### Agent Configuration
 - LLM Provider selection
@@ -33,6 +45,7 @@ The Multi-LLM application is built with a modular, agent-based architecture that
 - Personality traits
 - Tool access
 - Approval requirements
+- **MCP permissions and access**
 
 ### 2. Workflow System
 
@@ -50,13 +63,20 @@ The Multi-LLM application is built with a modular, agent-based architecture that
 - State persistence
 - Error handling
 - Event tracking
+- **MCP operation coordination**
 
 ### 3. Tool System
 
 #### Tool Types
 - **Functions**: JavaScript/TypeScript functions
+  - **Can leverage MCP capabilities**
+  - **MCP context integration**
 - **APIs**: External service integration
+  - **MCP-enhanced authentication**
+  - **MCP-powered caching**
 - **CLI**: Command-line tools
+  - **MCP-secured execution**
+  - **MCP permission checks**
 
 #### Features
 - Input validation
@@ -64,6 +84,8 @@ The Multi-LLM application is built with a modular, agent-based architecture that
 - Error handling
 - Usage tracking
 - Security controls
+- **MCP integration**
+- **MCP permission management**
 
 ### 4. Storage System
 
@@ -71,12 +93,39 @@ The Multi-LLM application is built with a modular, agent-based architecture that
 - **ChromaDB**: Chat history and context
 - **Weaviate**: Vector embeddings
 - **Local Storage**: Application state
+- **MCP Storage**: External capabilities
 
 #### Features
 - Data persistence
 - Vector search
 - State management
 - Backup/recovery
+- **MCP state tracking**
+
+### 5. MCP System
+
+#### Core MCPs
+- **Filesystem MCP**: File operations
+  - Read/write access
+  - Search capabilities
+  - Path permissions
+
+- **Browser MCP**: Web automation
+  - Page navigation
+  - Content extraction
+  - Form interaction
+
+- **Database MCP**: Data storage
+  - Query execution
+  - Schema management
+  - Connection pooling
+
+#### Features
+- Permission management
+- Operation approval
+- Resource limits
+- Audit logging
+- Error recovery
 
 ## Integration Points
 
@@ -85,18 +134,20 @@ The Multi-LLM application is built with a modular, agent-based architecture that
 - OpenAI API
 - Claude API
 - Custom providers
+- **MCP-enhanced providers**
 
 ### 2. External Services
 - Vector databases
 - API endpoints
 - CLI tools
-- Storage systems
+- ~~Storage systems~~ **MCP servers**
 
 ### 3. User Interface
 - React components
 - Real-time updates
 - Configuration management
 - Workflow visualization
+- **MCP operation monitoring**
 
 ## Security Architecture
 
@@ -105,24 +156,29 @@ The Multi-LLM application is built with a modular, agent-based architecture that
 - Parameter validation
 - Type checking
 - Schema enforcement
+- **MCP input validation**
 
 ### 2. Execution Safety
 - Command sanitization
 - API request validation
 - Resource limits
 - Timeout controls
+- **MCP operation safety**
 
 ### 3. Access Control
 - Tool permissions
 - Agent restrictions
 - Approval workflows
 - Audit logging
+- **MCP access control**
+- **MCP operation approval**
 
 ## Data Flow
 
 ```mermaid
 graph TD
-    User[User Input] --> Router[Router Agent]
+    User[User Input] --> chat[chat Agent]
+    chat --> Router[Router Agent]
     Router --> Existing{Existing Agent?}
     Existing -->|Yes| Agent[Execute Agent]
     Existing -->|No| Builder[Builder Agent]
@@ -131,7 +187,21 @@ graph TD
     Approval -->|Yes| Create[Create Component]
     Approval -->|No| Reject[Reject Request]
     Create --> Agent
-    Agent --> Result[Return Result]
+    
+    subgraph Tools
+        Agent --> Function[Function Tools]
+        Agent --> API[API Tools]
+        Agent --> CLI[CLI Tools]
+    end
+    
+    subgraph MCPs
+        Function --> FMCP[Filesystem MCP]
+        API --> BMCP[Browser MCP]
+        CLI --> DMCP[Database MCP]
+    end
+    
+    MCPs --> Result[Return Result]
+    Result --> User
 ```
 
 ## Best Practices
@@ -141,21 +211,29 @@ graph TD
 - Follow component patterns
 - Implement error handling
 - Write comprehensive tests
+- **Document MCP usage**
+- **Test MCP integration**
 
 ### 2. Security
 - Validate all inputs
 - Sanitize commands
 - Implement rate limiting
 - Regular security audits
+- **Monitor MCP access**
+- **Review MCP permissions**
 
 ### 3. Performance
 - Optimize database queries
 - Cache frequent operations
 - Monitor resource usage
 - Profile critical paths
+- **Efficient MCP usage**
+- **MCP operation batching**
 
 ### 4. Maintenance
 - Regular backups
 - Version control
 - Documentation updates
 - Dependency management
+- **MCP health monitoring**
+- **MCP version management**

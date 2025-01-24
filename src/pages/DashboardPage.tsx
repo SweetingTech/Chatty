@@ -1,72 +1,52 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { useAppStore } from '../store';
-import { StatusCard } from '../components/StatusCard';
+import { StatusCard, ServiceStatusType } from '../components/StatusCard';
 import { StatsCard } from '../components/StatsCard';
 import { MessageSquare, Database, Bot, Terminal } from 'lucide-react';
-import { weaviateService } from '../lib/weaviate';
-import { chromadb } from '../lib/chromadb';
 
 export function DashboardPage() {
-  const { settings, chatSessions } = useAppStore();
-  const [weaviateStatus, setWeaviateStatus] = useState<'online' | 'offline'>('offline');
-  const [lmStudioStatus, setLmStudioStatus] = useState<'online' | 'offline'>('offline');
+  const { settings, chatSessions, serviceStatus, initializeServices } = useAppStore();
 
   useEffect(() => {
-    checkWeaviateStatus();
-    checkLmStudioStatus();
+    // Initialize all services when dashboard mounts or settings change
+    initializeServices().catch(console.error);
   }, [settings.weaviateUrl, settings.lmStudioUrl]);
-
-  const checkWeaviateStatus = async () => {
-    try {
-      await weaviateService.init(settings.weaviateUrl);
-      setWeaviateStatus('online');
-    } catch {
-      setWeaviateStatus('offline');
-    }
-  };
-
-  const checkLmStudioStatus = async () => {
-    try {
-      const response = await fetch(settings.lmStudioUrl);
-      setLmStudioStatus(response.ok ? 'online' : 'offline');
-    } catch {
-      setLmStudioStatus('offline');
-    }
-  };
 
   const getServiceCards = () => [
     {
       title: 'LM Studio',
-      status: lmStudioStatus,
-      description: lmStudioStatus === 'online' 
+      status: serviceStatus.lmStudio,
+      description: serviceStatus.lmStudio === 'online' 
         ? 'Local LLM server is running and ready'
         : 'Local LLM server is not connected',
     },
     {
       title: 'OpenAI',
-      status: settings.openaiKey ? 'online' : 'offline',
+      status: settings.openaiKey ? ('online' as ServiceStatusType) : ('offline' as ServiceStatusType),
       description: settings.openaiKey
         ? 'API key configured and ready'
         : 'API key not configured',
     },
     {
       title: 'Claude',
-      status: settings.claudeKey ? 'online' : 'offline',
+      status: settings.claudeKey ? ('online' as ServiceStatusType) : ('offline' as ServiceStatusType),
       description: settings.claudeKey
         ? 'API key configured and ready'
         : 'API key not configured',
     },
     {
       title: 'Weaviate',
-      status: weaviateStatus,
-      description: weaviateStatus === 'online'
+      status: serviceStatus.weaviate,
+      description: serviceStatus.weaviate === 'online'
         ? 'Vector database is connected'
         : 'Vector database is not connected',
     },
     {
       title: 'ChromaDB',
-      status: 'online',
-      description: 'Local database is running',
+      status: serviceStatus.chromadb,
+      description: serviceStatus.chromadb === 'online'
+        ? 'Local database is running'
+        : 'Local database is not connected',
       stats: [
         {
           label: 'Chat Sessions',

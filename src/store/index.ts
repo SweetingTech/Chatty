@@ -1,17 +1,36 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Settings, ChatSession, Agent, Tool, API } from '../types';
+import type { Settings, ChatSession, Agent, Tool, API, LLMConfig, LLMProvider, ServiceStatus } from '../types';
 import { mcp, type ModelContext } from '../lib/mcp';
+import { weaviateService } from '../lib/weaviate';
+import { chromadb } from '../lib/chromadb';
+
+// Load environment variables
+const VITE_LM_STUDIO_URL = import.meta.env.VITE_LM_STUDIO_URL || 'http://localhost:5000';
+const VITE_WEAVIATE_URL = import.meta.env.VITE_WEAVIATE_URL || '';
+const VITE_OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || '';
+const VITE_CLAUDE_API_KEY = import.meta.env.VITE_CLAUDE_API_KEY || '';
+const VITE_BRAVE_API_KEY = import.meta.env.VITE_BRAVE_API_KEY || '';
 
 interface AppState {
   // Settings
   settings: Settings;
   draftSettings: Settings | null;
   updateSettings: (settings: Partial<Settings>) => void;
-  saveDraftSettings: () => void;
+  saveDraftSettings: () => Promise<void>;
   updateDraftSettings: (settings: Partial<Settings>) => void;
   hasDraftSettings: () => boolean;
   
+  // Service Status
+  serviceStatus: ServiceStatus;
+  updateServiceStatus: (status: Partial<ServiceStatus>) => void;
+  initializeServices: () => Promise<void>;
+
+  // LLM Providers
+  llmConfigs: Record<LLMProvider, LLMConfig>;
+  updateLLMConfig: (provider: LLMProvider, config: Partial<LLMConfig>) => void;
+  setDefaultProvider: (provider: LLMProvider) => void;
+
   // Agents
   agents: Agent[];
   draftAgents: { [id: string]: Agent | null };
@@ -91,13 +110,53 @@ export const useAppStore = create<AppState>()(
     (set, get) => {
       const state = {
         settings: {
-          lmStudioUrl: '',
-          weaviateUrl: '',
-          openaiKey: '',
-          claudeKey: '',
+          lmStudioUrl: VITE_LM_STUDIO_URL,
+          weaviateUrl: VITE_WEAVIATE_URL,
+          openaiKey: VITE_OPENAI_API_KEY,
+          claudeKey: VITE_CLAUDE_API_KEY,
           theme: 'light' as const,
+          braveApiKey: VITE_BRAVE_API_KEY,
+          defaultLLMProvider: 'none' as LLMProvider,
         } satisfies Settings,
         draftSettings: null,
+        serviceStatus: {
+          weaviate: 'offline',
+          chromadb: 'offline',
+          lmStudio: 'offline',
+        } satisfies ServiceStatus,
+        llmConfigs: {
+          'lm-studio': {
+            provider: 'lm-studio',
+            enabled: true,
+            isDefault: false,
+            model: 'default',
+            temperature: 0.7,
+            maxTokens: 2000,
+          },
+          'openai': {
+            provider: 'openai',
+            enabled: !!VITE_OPENAI_API_KEY,
+            isDefault: false,
+            apiKey: VITE_OPENAI_API_KEY,
+            model: 'gpt-3.5-turbo',
+            temperature: 0.7,
+            maxTokens: 2000,
+          },
+          'claude': {
+            provider: 'claude',
+            enabled: !!VITE_CLAUDE_API_KEY,
+            isDefault: false,
+            apiKey: VITE_CLAUDE_API_KEY,
+            model: 'claude-2',
+            temperature: 0.7,
+            maxTokens: 2000,
+          },
+          'none': {
+            provider: 'none',
+            enabled: true,
+            isDefault: true,
+          }
+        } satisfies Record<LLMProvider, LLMConfig>,
         updateSettings: (newSettings: Partial<Settings>) =>
           set((state) => ({
             settings: { ...state.settings, ...newSettings },
@@ -106,9 +165,7 @@ export const useAppStore = create<AppState>()(
           })),
         saveDraftSettings: async () => {
           try {
-            // Simulate async operation (e.g., API call or local storage update)
             await new Promise((resolve) => setTimeout(resolve, 100));
-            
             set((state) => ({
               settings: state.draftSettings ? { ...state.settings, ...state.draftSettings } : state.settings,
               draftSettings: null,
@@ -126,6 +183,71 @@ export const useAppStore = create<AppState>()(
           const state = get();
           return state.draftSettings !== null;
         },
+        updateServiceStatus: (status: Partial<ServiceStatus>) =>
+          set((state) => ({
+            serviceStatus: { ...state.serviceStatus, ...status },
+          })),
+        initializeServices: async () => {
+          const state = get();
+          const { settings, updateServiceStatus } = state;
+
+          // Initialize Weaviate
+          try {
+            await weaviateService.init(settings.weaviateUrl);
+            updateServiceStatus({ weaviate: 'online' });
+          } catch (error) {
+            console.error('Failed to initialize Weaviate:', error);
+            updateServiceStatus({ weaviate: 'offline' });
+          }
+
+          // Initialize ChromaDB
+          try {
+            await chromadb.init();
+            updateServiceStatus({ chromadb: 'online' });
+          } catch (error) {
+            console.error('Failed to initialize ChromaDB:', error);
+            updateServiceStatus({ chromadb: 'offline' });
+          }
+
+          // Check LM Studio
+          try {
+            const response = await fetch(settings.lmStudioUrl);
+            updateServiceStatus({ lmStudio: response.ok ? 'online' : 'offline' });
+          } catch (error) {
+            console.error('Failed to connect to LM Studio:', error);
+            updateServiceStatus({ lmStudio: 'offline' });
+          }
+        },
+        updateLLMConfig: (provider: LLMProvider, config: Partial<LLMConfig>) =>
+          set((state) => ({
+            llmConfigs: {
+              ...state.llmConfigs,
+              [provider]: { ...state.llmConfigs[provider], ...config }
+            }
+          })),
+        setDefaultProvider: (provider: LLMProvider) =>
+          set((state) => {
+            const updatedConfigs = Object.entries(state.llmConfigs).reduce(
+              (acc, [key, config]) => ({
+                ...acc,
+                [key]: { ...config, isDefault: false }
+              }),
+              {} as Record<LLMProvider, LLMConfig>
+            );
+            
+            updatedConfigs[provider] = {
+              ...updatedConfigs[provider],
+              isDefault: true
+            };
+
+            return {
+              settings: {
+                ...state.settings,
+                defaultLLMProvider: provider
+              },
+              llmConfigs: updatedConfigs
+            };
+          }),
         currentChatId: null,
         setCurrentChatId: (id: string | null) => set({ currentChatId: id }),
         chatSessions: [],

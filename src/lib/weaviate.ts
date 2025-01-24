@@ -1,6 +1,19 @@
 import weaviate, { WeaviateClient, ApiKey } from 'weaviate-ts-client';
 import { useAppStore } from '../store';
 
+interface DocumentMetadata {
+  createdAt: number;
+  type: string;
+  tags?: string[];
+}
+
+interface Document {
+  title: string;
+  content: string;
+  vector?: number[];
+  metadata: DocumentMetadata;
+}
+
 class WeaviateService {
   private static instance: WeaviateService;
   private client: WeaviateClient | null = null;
@@ -15,67 +28,29 @@ class WeaviateService {
   }
 
   public async init(url: string) {
+    if (!url) {
+      throw new Error('Missing Weaviate URL');
+    }
+
     try {
+      // Parse the URL to get scheme and host
+      const parsedUrl = new URL(url);
+      
       this.client = weaviate.client({
-        scheme: 'http',
-        host: url.replace(/^https?:\/\//, ''),
+        scheme: parsedUrl.protocol.replace(':', ''),
+        host: parsedUrl.host,
       });
 
-      // Ensure the schema exists
-      await this.createSchema();
+      // Verify connection by getting schema
+      await this.client.schema.getter().do();
+      console.log('Successfully connected to Weaviate');
     } catch (error) {
       console.error('Failed to initialize Weaviate:', error);
       throw error;
     }
   }
 
-  private async createSchema() {
-    if (!this.client) throw new Error('Weaviate client not initialized');
-
-    try {
-      const schemaExists = await this.client.schema
-        .classGetter()
-        .withClassName('Document')
-        .do();
-
-      if (!schemaExists) {
-        await this.client.schema
-          .classCreator()
-          .withClass({
-            class: 'Document',
-            description: 'A document with embeddings',
-            properties: [
-              {
-                name: 'title',
-                dataType: ['text'],
-                description: 'The title of the document',
-              },
-              {
-                name: 'content',
-                dataType: ['text'],
-                description: 'The content of the document',
-              },
-              {
-                name: 'createdAt',
-                dataType: ['number'],
-                description: 'Timestamp when the document was created',
-              },
-            ],
-            vectorizer: 'text2vec-transformers',
-          })
-          .do();
-      }
-    } catch (error) {
-      console.error('Failed to create schema:', error);
-      throw error;
-    }
-  }
-
-  public async addDocument(document: {
-    title: string;
-    content: string;
-    createdAt: number;
-  }) {
+  public async addDocument(document: Document) {
     if (!this.client) throw new Error('Weaviate client not initialized');
 
     try {
@@ -85,7 +60,7 @@ class WeaviateService {
         .withProperties({
           title: document.title,
           content: document.content,
-          createdAt: document.createdAt,
+          metadata: document.metadata,
         })
         .do();
 
@@ -103,7 +78,7 @@ class WeaviateService {
       const result = await this.client.graphql
         .get()
         .withClassName('Document')
-        .withFields(['title', 'content', 'createdAt', '_additional { id }'])
+        .withFields('title content metadata { createdAt type tags } _additional { id }')
         .withNearText({ concepts: [query] })
         .withLimit(10)
         .do();
@@ -133,7 +108,7 @@ class WeaviateService {
       const result = await this.client.graphql
         .get()
         .withClassName('Document')
-        .withFields(['title', 'content', 'createdAt', '_additional { id }'])
+        .withFields('title content metadata { createdAt type tags } _additional { id }')
         .withLimit(100)
         .do();
 

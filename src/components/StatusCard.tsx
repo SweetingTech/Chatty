@@ -1,9 +1,11 @@
 import React from 'react';
 import { CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 
-interface StatusCardProps {
+export type ServiceStatusType = 'online' | 'offline' | 'warning';
+
+export interface StatusCardProps {
   title: string;
-  status: 'online' | 'offline' | 'warning';
+  status: ServiceStatusType;
   description: string;
   stats?: {
     label: string;
