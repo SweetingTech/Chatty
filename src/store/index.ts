@@ -432,7 +432,8 @@ export const useAppStore = create<AppState>()(
         draftMCPs: {},
         updateDraftMCP: (id: string, updates: Partial<ModelContext>) =>
           set((state) => {
-            const context = mcp.getContext(id);
+            const contexts = mcp.getAllContexts();
+            const context = contexts.find(c => c.id === id);
             if (!context) return state;
             
             const currentDraft = state.draftMCPs?.[id] || context;
@@ -443,19 +444,29 @@ export const useAppStore = create<AppState>()(
               }
             };
           }),
-        saveDraftMCP: (id: string) =>
-          set((state) => {
-            const draftMCP = state.draftMCPs[id];
-            if (!draftMCP) return state;
-            
-            mcp.updateContext(id, draftMCP);
-            return {
-              draftMCPs: {
-                ...state.draftMCPs,
-                [id]: null
-              }
-            };
-          }),
+        saveDraftMCP: async (id: string) => {
+          try {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            set((state) => {
+              const draftMCP = state.draftMCPs[id];
+              if (!draftMCP) return state;
+              
+              // Delete and recreate the context with updated data
+              mcp.deleteContext(id);
+              mcp.createContext(draftMCP.model, draftMCP.context, draftMCP.metadata);
+              
+              return {
+                draftMCPs: {
+                  ...state.draftMCPs,
+                  [id]: null
+                }
+              };
+            });
+          } catch (error) {
+            console.error('Failed to save MCP draft:', error);
+            throw error;
+          }
+        },
         hasDraftMCP: (id: string) => {
           const state = get();
           return state.draftMCPs[id] !== null && state.draftMCPs[id] !== undefined;

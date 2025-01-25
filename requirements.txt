@@ -2,3 +2,5 @@ chromadb==0.4.22
 fastapi>=0.115.7
 uvicorn>=0.34.0
 python-dotenv>=1.0.1
+numpy==1.26.4
+setuptools>=69.0.0

@@ -64,15 +64,32 @@ A powerful and flexible application for managing and interacting with multiple L
    cd multi-llm-app
    ```
 
-2. Install dependencies:
+2. Run the installation script:
    ```bash
-   npm install
+   install.bat
+   ```
+   
+   The installation script provides several options:
+   - Full Installation (All Components)
+   - Frontend Only (npm packages)
+   - Python Environment Only
+   - ChromaDB Setup Only
+   - Weaviate Setup Only
+
+   Choose the appropriate option based on your needs. For first-time setup, select "Full Installation".
+
+3. Configure environment variables:
+   - Copy `.env.example` to `.env`
+   - Update the configuration values in `.env`
+
+4. Start the application:
+   ```bash
+   start.bat
    ```
 
-3. Start the development server:
-   ```bash
-   npm run dev
-   ```
+   This will start both the ChromaDB server and the frontend development server.
+
+Note: If you encounter any issues during installation, you can run individual components of the installation process by selecting the appropriate option in `install.bat`.
 
 ### Configuration
 

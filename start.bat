@@ -1,22 +1,30 @@
 @echo off
-REM Activate virtual environment and start ChromaDB server
+setlocal enabledelayedexpansion
+
+:: Check if components are installed
 if not exist venv (
-    echo Creating virtual environment...
-    python -m venv venv
-    call venv\Scripts\activate
-    echo Installing Python dependencies...
-    pip install -r requirements.txt
-) else (
-    call venv\Scripts\activate
+    echo Virtual environment not found. Please run install.bat first.
+    pause
+    exit /b 1
 )
 
-REM Start ChromaDB server in a new window
+if not exist node_modules (
+    echo Node modules not found. Please run install.bat first.
+    pause
+    exit /b 1
+)
+
+:: Activate virtual environment
+call venv\Scripts\activate
+
+:: Start ChromaDB server in a new window
 echo Starting ChromaDB server...
 start cmd /k "python start_chroma.py"
 
-REM Wait a moment for ChromaDB to start
+:: Wait for ChromaDB to initialize
+echo Waiting for ChromaDB to initialize...
 timeout /t 2
 
-REM Start the frontend
+:: Start the frontend
 echo Starting frontend...
-npm run start
+npm run dev

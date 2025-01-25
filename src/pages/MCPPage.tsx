@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, GitMerge, Network, Settings2, ArrowRight, Check } from 'lucide-react';
-import { mcp, type ModelContext, type ModelResponse } from '../lib/mcp';
+import { mcp } from '../lib/mcp';
+import type { ModelContext } from '../types/mcp';
 import { Modal } from '../components/Modal';
 import { SaveButton } from '../components/SaveButton';
 import { useAppStore } from '../store';
@@ -20,7 +21,7 @@ export function MCPPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingContext, setEditingContext] = useState<ModelContext | null>(null);
-  const [apis, setApis] = useState<API[]>(getBaseAPIs());
+  const [apis] = useState<API[]>(getBaseAPIs());
   const [formData, setFormData] = useState<MCPFormData>({
     model: '',
     initialContext: '',
@@ -406,7 +407,14 @@ export function MCPPage() {
 
                   <div className="pt-4 border-t border-gray-200">
                     <SaveButton 
-                      onSave={() => saveDraftMCP(context.id)}
+                      onSave={async () => {
+                        try {
+                          await saveDraftMCP(context.id);
+                          refreshContexts();
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : 'Failed to save changes');
+                        }
+                      }}
                       hasChanges={hasDraftMCP(context.id)}
                     />
                   </div>
