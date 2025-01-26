@@ -1,16 +1,23 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Settings, ChatSession, Agent, Tool, API, LLMConfig, LLMProvider, ServiceStatus } from '../types';
+import type { Settings, ChatSession, Agent, Tool, API, LLMConfig, ProviderType, ServiceStatus } from '../types';
+import type { LMStudioConfig } from '../lib/llm/types';
 import { mcp, type ModelContext } from '../lib/mcp';
 import { weaviateService } from '../lib/weaviate';
 import { chromadb } from '../lib/chromadb';
+import { defaultAgents } from '../lib/agents/defaults';
+import { defaultTools } from '../lib/tools/defaults';
+import type { ChromaDocument } from '../lib/chromadb/types';
 
 // Load environment variables
-const VITE_LM_STUDIO_URL = import.meta.env.VITE_LM_STUDIO_URL || 'http://localhost:5000';
+const VITE_LM_STUDIO_HOST = import.meta.env.VITE_LM_STUDIO_HOST || 'localhost';
+const VITE_LM_STUDIO_PORT = import.meta.env.VITE_LM_STUDIO_PORT || '1234';
+const VITE_LM_STUDIO_URL = `http://${VITE_LM_STUDIO_HOST}:${VITE_LM_STUDIO_PORT}`;
 const VITE_WEAVIATE_URL = import.meta.env.VITE_WEAVIATE_URL || '';
 const VITE_OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || '';
 const VITE_CLAUDE_API_KEY = import.meta.env.VITE_CLAUDE_API_KEY || '';
 const VITE_BRAVE_API_KEY = import.meta.env.VITE_BRAVE_API_KEY || '';
+const VITE_DEEPSEEK_API_KEY = import.meta.env.VITE_DEEPSEEK_API_KEY || '';
 
 interface AppState {
   // Settings
@@ -27,9 +34,9 @@ interface AppState {
   initializeServices: () => Promise<void>;
 
   // LLM Providers
-  llmConfigs: Record<LLMProvider, LLMConfig>;
-  updateLLMConfig: (provider: LLMProvider, config: Partial<LLMConfig>) => void;
-  setDefaultProvider: (provider: LLMProvider) => void;
+  llmConfigs: Record<ProviderType, LLMConfig>;
+  updateLLMConfig: (provider: ProviderType, config: Partial<LLMConfig>) => void;
+  setDefaultProvider: (provider: ProviderType) => void;
 
   // Agents
   agents: Agent[];
@@ -111,12 +118,14 @@ export const useAppStore = create<AppState>()(
       const state = {
         settings: {
           lmStudioUrl: VITE_LM_STUDIO_URL,
+          lmStudioHost: VITE_LM_STUDIO_HOST,
+          lmStudioPort: VITE_LM_STUDIO_PORT,
           weaviateUrl: VITE_WEAVIATE_URL,
           openaiKey: VITE_OPENAI_API_KEY,
           claudeKey: VITE_CLAUDE_API_KEY,
           theme: 'light' as const,
           braveApiKey: VITE_BRAVE_API_KEY,
-          defaultLLMProvider: 'none' as LLMProvider,
+          defaultLLMProvider: 'lm-studio' as ProviderType,
         } satisfies Settings,
         draftSettings: null,
         serviceStatus: {
@@ -128,14 +137,16 @@ export const useAppStore = create<AppState>()(
           'lm-studio': {
             provider: 'lm-studio',
             enabled: true,
-            isDefault: false,
+            isDefault: true,
             model: 'default',
             temperature: 0.7,
             maxTokens: 2000,
-          },
+            host: VITE_LM_STUDIO_HOST,
+            port: VITE_LM_STUDIO_PORT
+          } as LMStudioConfig,
           'openai': {
             provider: 'openai',
-            enabled: !!VITE_OPENAI_API_KEY,
+            enabled: true,
             isDefault: false,
             apiKey: VITE_OPENAI_API_KEY,
             model: 'gpt-3.5-turbo',
@@ -144,19 +155,28 @@ export const useAppStore = create<AppState>()(
           },
           'claude': {
             provider: 'claude',
-            enabled: !!VITE_CLAUDE_API_KEY,
+            enabled: true,
             isDefault: false,
             apiKey: VITE_CLAUDE_API_KEY,
             model: 'claude-2',
             temperature: 0.7,
             maxTokens: 2000,
           },
+          'deepseek': {
+            provider: 'deepseek',
+            enabled: true,
+            isDefault: false,
+            apiKey: VITE_DEEPSEEK_API_KEY,
+            model: 'deepseek-chat',
+            temperature: 0.7,
+            maxTokens: 2000,
+          },
           'none': {
             provider: 'none',
             enabled: true,
-            isDefault: true,
+            isDefault: false,
           }
-        } satisfies Record<LLMProvider, LLMConfig>,
+        } satisfies Record<ProviderType, LLMConfig>,
         updateSettings: (newSettings: Partial<Settings>) =>
           set((state) => ({
             settings: { ...state.settings, ...newSettings },
@@ -204,6 +224,20 @@ export const useAppStore = create<AppState>()(
           try {
             await chromadb.init();
             updateServiceStatus({ chromadb: 'online' });
+
+            // Load default agents and tools
+            const defaultState = {
+              agents: defaultAgents,
+              tools: defaultTools
+            };
+
+            // Initialize with default state
+            set(state => ({
+              ...state,
+              agents: defaultState.agents,
+              tools: defaultState.tools
+            }));
+
           } catch (error) {
             console.error('Failed to initialize ChromaDB:', error);
             updateServiceStatus({ chromadb: 'offline' });
@@ -211,28 +245,29 @@ export const useAppStore = create<AppState>()(
 
           // Check LM Studio
           try {
-            const response = await fetch(settings.lmStudioUrl);
+            const lmStudioUrl = settings.lmStudioUrl || VITE_LM_STUDIO_URL;
+            const response = await fetch(lmStudioUrl);
             updateServiceStatus({ lmStudio: response.ok ? 'online' : 'offline' });
           } catch (error) {
             console.error('Failed to connect to LM Studio:', error);
             updateServiceStatus({ lmStudio: 'offline' });
           }
         },
-        updateLLMConfig: (provider: LLMProvider, config: Partial<LLMConfig>) =>
+        updateLLMConfig: (provider: ProviderType, config: Partial<LLMConfig>) =>
           set((state) => ({
             llmConfigs: {
               ...state.llmConfigs,
               [provider]: { ...state.llmConfigs[provider], ...config }
             }
           })),
-        setDefaultProvider: (provider: LLMProvider) =>
+        setDefaultProvider: (provider: ProviderType) =>
           set((state) => {
             const updatedConfigs = Object.entries(state.llmConfigs).reduce(
               (acc, [key, config]) => ({
                 ...acc,
                 [key]: { ...config, isDefault: false }
               }),
-              {} as Record<LLMProvider, LLMConfig>
+              {} as Record<ProviderType, LLMConfig>
             );
             
             updatedConfigs[provider] = {
@@ -273,7 +308,38 @@ export const useAppStore = create<AppState>()(
           set((state) => ({
             agents: [...state.agents, agent],
           })),
-        updateAgent: (id: string, updates: Partial<Agent>) =>
+        updateAgent: async (id: string, updates: Partial<Agent>) => {
+          const state = get();
+          const agent = state.agents.find(a => a.id === id);
+          if (!agent) return;
+
+          // Get base agent from defaults
+          const baseAgent = defaultAgents.find(a => a.id === id);
+          if (!baseAgent) return;
+
+          // Calculate changes from base
+          const updatedAgent = { ...agent, ...updates };
+          const changes = Object.entries(updatedAgent).reduce((acc, [key, value]) => {
+            if (JSON.stringify(value) !== JSON.stringify(baseAgent[key as keyof Agent])) {
+              acc[key] = value;
+            }
+            return acc;
+          }, {} as Record<string, any>);
+
+          // Save to ChromaDB if there are changes
+          if (Object.keys(changes).length > 0) {
+            try {
+              const collection = await chromadb.getOrCreateCollection('agent_modifications', { description: 'Stores modifications to default agents' });
+              await collection.add({
+                ids: [id],
+                metadatas: [{ timestamp: Date.now() }] as Record<string, any>[],
+                documents: [JSON.stringify({ targetId: id, changes })]
+              });
+            } catch (error) {
+              console.error('Failed to save agent modifications:', error);
+            }
+          }
+
           set((state) => ({
             agents: state.agents.map((agent) =>
               agent.id === id ? { ...agent, ...updates } : agent
@@ -282,7 +348,8 @@ export const useAppStore = create<AppState>()(
               ...state.draftAgents,
               [id]: null
             }
-          })),
+          }));
+        },
         updateDraftAgent: (id: string, updates: Partial<Agent>) =>
           set((state) => {
             const agent = state.agents.find(a => a.id === id);
@@ -326,7 +393,38 @@ export const useAppStore = create<AppState>()(
           set((state) => ({
             tools: [...state.tools, tool],
           })),
-        updateTool: (id: string, updates: Partial<Tool>) =>
+        updateTool: async (id: string, updates: Partial<Tool>) => {
+          const state = get();
+          const tool = state.tools.find(t => t.id === id);
+          if (!tool) return;
+
+          // Get base tool from defaults
+          const baseTool = defaultTools.find(t => t.id === id);
+          if (!baseTool) return;
+
+          // Calculate changes from base
+          const updatedTool = { ...tool, ...updates };
+          const changes = Object.entries(updatedTool).reduce((acc, [key, value]) => {
+            if (JSON.stringify(value) !== JSON.stringify(baseTool[key as keyof Tool])) {
+              acc[key] = value;
+            }
+            return acc;
+          }, {} as Record<string, any>);
+
+          // Save to ChromaDB if there are changes
+          if (Object.keys(changes).length > 0) {
+            try {
+              const collection = await chromadb.getOrCreateCollection('tool_modifications', { description: 'Stores modifications to default tools' });
+              await collection.add({
+                ids: [id],
+                metadatas: [{ timestamp: Date.now() }] as Record<string, any>[],
+                documents: [JSON.stringify({ targetId: id, changes })]
+              });
+            } catch (error) {
+              console.error('Failed to save tool modifications:', error);
+            }
+          }
+
           set((state) => ({
             tools: state.tools.map((tool) =>
               tool.id === id ? { ...tool, ...updates } : tool
@@ -335,7 +433,8 @@ export const useAppStore = create<AppState>()(
               ...state.draftTools,
               [id]: null
             }
-          })),
+          }));
+        },
         deleteTool: (id: string) =>
           set((state) => ({
             tools: state.tools.filter((tool) => tool.id !== id),

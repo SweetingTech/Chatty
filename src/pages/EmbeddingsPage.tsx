@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../store';
 import { DocumentUploader } from '../components/DocumentUploader';
 import { DocumentList } from '../components/DocumentList';
 import { weaviateService } from '../lib/weaviate';
+import type { Document, WeaviateDocument } from '../lib/weaviate';
 import type { EmbeddedDocument } from '../types';
 
 export function EmbeddingsPage() {
@@ -17,18 +18,19 @@ export function EmbeddingsPage() {
     }
   }, [settings.weaviateUrl]);
 
+  const transformToEmbeddedDocument = (doc: WeaviateDocument): EmbeddedDocument => ({
+    id: doc._additional.id,
+    title: doc.title,
+    content: doc.content,
+    embedding: doc.vector || [],
+    createdAt: doc.metadata.createdAt
+  });
+
   const loadDocuments = async () => {
     try {
       await weaviateService.init(settings.weaviateUrl);
-      const docs = await weaviateService.getAllDocuments();
-      setDocuments(
-        docs.map((doc: any) => ({
-          id: doc._additional.id,
-          title: doc.title,
-          content: doc.content,
-          createdAt: doc.createdAt,
-        }))
-      );
+      const docs = await weaviateService.getAllDocuments() as WeaviateDocument[];
+      setDocuments(docs.map(transformToEmbeddedDocument));
     } catch (err) {
       setError('Failed to load documents. Please check your Weaviate connection.');
       console.error(err);
@@ -45,7 +47,11 @@ export function EmbeddingsPage() {
         await weaviateService.addDocument({
           title: file.name,
           content,
-          createdAt: Date.now(),
+          metadata: {
+            createdAt: Date.now(),
+            type: 'uploaded',
+            tags: []
+          }
         });
       }
       await loadDocuments();
@@ -69,15 +75,8 @@ export function EmbeddingsPage() {
 
   const handleSearch = async (content: string) => {
     try {
-      const results = await weaviateService.searchDocuments(content);
-      setDocuments(
-        results.map((doc: any) => ({
-          id: doc._additional.id,
-          title: doc.title,
-          content: doc.content,
-          createdAt: doc.createdAt,
-        }))
-      );
+      const results = await weaviateService.searchDocuments(content) as WeaviateDocument[];
+      setDocuments(results.map(transformToEmbeddedDocument));
     } catch (err) {
       setError('Failed to search documents. Please try again.');
       console.error(err);

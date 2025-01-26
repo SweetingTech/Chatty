@@ -1,10 +1,10 @@
 import { z } from 'zod';
 import { ServiceStatusType } from '../components/StatusCard';
 
-export type LLMProvider = 'lm-studio' | 'openai' | 'claude' | 'none';
+export type ProviderType = 'lm-studio' | 'openai' | 'claude' | 'deepseek' | 'none';
 
 export interface LLMConfig {
-  provider: LLMProvider;
+  provider: ProviderType;
   model?: string;
   temperature?: number;
   maxTokens?: number;
@@ -20,13 +20,15 @@ export interface ServiceStatus {
 }
 
 export interface Settings {
-  lmStudioUrl: string;
+  lmStudioUrl?: string;
+  lmStudioHost?: string;
+  lmStudioPort?: string | number;
   weaviateUrl: string;
   openaiKey: string;
   claudeKey: string;
   theme: 'light' | 'dark';
   braveApiKey?: string;
-  defaultLLMProvider?: LLMProvider;
+  defaultLLMProvider?: ProviderType;
 }
 
 export interface ChatMessage {
@@ -80,7 +82,7 @@ export interface Agent {
   llmConfig: LLMConfig;
   personality?: AgentPersonality;
   config: Record<string, unknown>;
-  type: 'router' | 'builder' | 'chat' | 'custom';
+  type: 'router' | 'builder' | 'chat' | 'task' | 'integration' | 'learning' | 'custom';
   requires_approval?: boolean;
 }
 
@@ -140,7 +142,7 @@ export interface BuildPlan {
 
 // Zod schemas for validation
 export const llmConfigSchema = z.object({
-  provider: z.enum(['lm-studio', 'openai', 'claude', 'none']),
+  provider: z.enum(['lm-studio', 'openai', 'claude', 'deepseek', 'none']),
   model: z.string().optional(),
   temperature: z.number().min(0).max(1).optional(),
   maxTokens: z.number().positive().optional(),
@@ -164,6 +166,8 @@ export const agentSchema = z.object({
   llmConfig: llmConfigSchema,
   personality: agentPersonalitySchema.optional(),
   config: z.record(z.unknown()),
-  type: z.enum(['router', 'builder', 'chat', 'custom']),
+  type: z.enum(['router', 'builder', 'chat', 'task', 'integration', 'learning', 'custom']),
   requires_approval: z.boolean().optional(),
 });
+
+export type { LLMProvider } from '../lib/llm/types';

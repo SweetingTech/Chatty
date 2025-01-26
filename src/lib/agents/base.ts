@@ -64,8 +64,9 @@ export abstract class BaseAgent {
 
   // Validate request structure and permissions
   private validateRequest(request: AgentRequest): void {
-    if (!request.operation) {
-      throw new Error('Missing operation in request');
+    // Allow requests with either operation or payload
+    if (!request.operation && !request.payload) {
+      throw new Error('Request must contain either operation or payload');
     }
     // Additional validation logic here
   }

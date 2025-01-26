@@ -1,57 +1,104 @@
-import { BaseAgent } from './base';
-import { AgentRequest, AgentResponse } from '../../types/agent';
+import { CoreAgent } from './core';
+import { AgentRequest } from '../../types/agent';
 import { ChatMessage, ConversationState } from '../../types/chat';
-import { Tool } from '../tools/base';
-import { MCPClient } from '../mcp';
+import { 
+  LLMConfig, 
+  LLMMessage,
+  LMStudioConfig,
+  ClaudeConfig,
+  OpenAIConfig,
+  DeepseekConfig,
+  ProviderType
+} from '../llm/types';
+import { LMStudioProvider } from '../llm/providers/lm-studio';
+import { ClaudeProvider } from '../llm/providers/claude';
+import { OpenAIProvider } from '../llm/providers/openai';
+import { DeepseekProvider } from '../llm/providers/deepseek';
+import { v4 as uuidv4 } from 'uuid';
 
-export class ChatAgent extends BaseAgent {
+export interface ChatAgentConfig {
+  defaultProvider: ProviderType;
+  llmConfig: LLMConfig | null;
+}
+
+export class ChatAgent extends CoreAgent {
   private conversationState: Map<string, ConversationState>;
+  private config: ChatAgentConfig;
+  private provider: ProviderType;
+  private llmProvider: LMStudioProvider | ClaudeProvider | OpenAIProvider | DeepseekProvider;
+  private isInitialized: boolean = false;
+  private initPromise: Promise<void> | null = null;
 
-  constructor(mcpClient: MCPClient) {
-    super(mcpClient);
-    this.conversationState = new Map();
+  // Public methods for debugging
+  public getProviderInfo(): { provider: ProviderType; baseUrl?: string } {
+    if (this.provider === 'lm-studio') {
+      return {
+        provider: this.provider,
+        baseUrl: (this.llmProvider as LMStudioProvider)['baseUrl']
+      };
+    }
+    return { provider: this.provider };
   }
 
-  protected async processRequest(request: AgentRequest): Promise<AgentResponse> {
-    try {
-      const { conversationId, message } = request.payload as ChatMessage;
-      
-      // Get or create conversation state
-      let state = this.conversationState.get(conversationId);
-      if (!state) {
-        state = this.createNewConversation(conversationId);
-        this.conversationState.set(conversationId, state);
-      }
+  public getConfigInfo(): { defaultProvider: ProviderType; model?: string } {
+    return {
+      defaultProvider: this.config.defaultProvider,
+      model: this.config.llmConfig?.model
+    };
+  }
 
-      // Execute MCP operation if present
-      let operationResult;
-      if (request.operation) {
-        operationResult = await this.executeMCPOperation(request.operation);
-        state.context.lastOperation = {
-          name: request.operation.toolName,
-          result: operationResult
+  constructor(config: ChatAgentConfig) {
+    super();
+    this.conversationState = new Map();
+    this.config = config;
+    this.provider = config.defaultProvider;
+    this.llmProvider = this.initializeProvider();
+  }
+
+  private initializeProvider(): LMStudioProvider | ClaudeProvider | OpenAIProvider | DeepseekProvider {
+    const { defaultProvider, llmConfig } = this.config;
+
+    switch (defaultProvider) {
+      case 'lm-studio': {
+        const config: LMStudioConfig = {
+          provider: defaultProvider,
+          enabled: true,
+          baseUrl: (llmConfig as LMStudioConfig)?.baseUrl || 'http://localhost:1234',
+          model: llmConfig?.model
         };
+        return new LMStudioProvider(config);
       }
-
-      // Process message through conversation pipeline
-      const response = await this.processMessage(state, message);
-
-      return {
-        success: true,
-        message: response,
-        data: {
-          conversation: state,
-          operationResult
-        },
-        timestamp: new Date().toISOString()
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : 'Unknown error occurred',
-        error: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString()
-      };
+      case 'claude': {
+        const config: ClaudeConfig = {
+          provider: defaultProvider,
+          enabled: true,
+          apiKey: (llmConfig as ClaudeConfig)?.apiKey || '',
+          model: llmConfig?.model
+        };
+        return new ClaudeProvider(config);
+      }
+      case 'openai': {
+        const config: OpenAIConfig = {
+          provider: defaultProvider,
+          enabled: true,
+          apiKey: (llmConfig as OpenAIConfig)?.apiKey || '',
+          model: llmConfig?.model,
+          organization: (llmConfig as OpenAIConfig)?.organization
+        };
+        return new OpenAIProvider(config);
+      }
+      case 'deepseek': {
+        const config: DeepseekConfig = {
+          provider: defaultProvider,
+          enabled: true,
+          apiKey: (llmConfig as DeepseekConfig)?.apiKey || '',
+          model: llmConfig?.model,
+          baseUrl: (llmConfig as DeepseekConfig)?.baseUrl
+        };
+        return new DeepseekProvider(config);
+      }
+      default:
+        throw new Error(`Unsupported provider: ${defaultProvider}`);
     }
   }
 
@@ -64,88 +111,112 @@ export class ChatAgent extends BaseAgent {
     };
   }
 
-  private async processMessage(state: ConversationState, message: string): Promise<string> {
+  protected async processRequest(request: AgentRequest): Promise<any> {
     try {
-      // Add message to conversation history
+      console.log('ChatAgent processRequest called with:', request);
+      
+      if (!request.payload) {
+        throw new Error('Chat request must contain a payload');
+      }
+
+      const { conversationId, message } = request.payload as { conversationId: string; message: string };
+      console.log('Processing chat request:', { conversationId, message, provider: this.provider });
+      
+      // Get or create conversation state
+      let state = this.conversationState.get(conversationId);
+      if (!state) {
+        state = this.createNewConversation(conversationId);
+        this.conversationState.set(conversationId, state);
+      }
+
+      // Add user message to conversation history
       const userMessage: ChatMessage = {
-        conversationId: state.id,
-        message,
-        timestamp: new Date().toISOString()
+        id: uuidv4(),
+        role: 'user',
+        content: message,
+        timestamp: Date.now(),
+        conversationId: state.id
       };
       state.messages.push(userMessage);
 
-      // Process message through registered tools
-      const toolResponses = await this.processThroughTools(state, message);
+      // Convert chat messages to LLM format
+      const llmMessages: LLMMessage[] = state.messages.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
+
+      console.log('Sending messages to LLM:', { 
+        messages: llmMessages,
+        provider: this.provider,
+        config: this.config,
+        llmConfig: this.config.llmConfig
+      });
+
+      if (!this.llmProvider) {
+        throw new Error('LLM provider not initialized');
+      }
+
+      // Get response from LLM provider
+      const llmResponse = await this.llmProvider.chat(llmMessages, this.config.llmConfig || undefined);
       
-      // Generate response
-      const response = await this.generateResponse(state, toolResponses);
-      
+      console.log('Received LLM response:', llmResponse);
+
       // Add assistant response to conversation history
       const assistantMessage: ChatMessage = {
-        conversationId: state.id,
-        message: response,
-        timestamp: new Date().toISOString()
+        id: uuidv4(),
+        role: 'assistant',
+        content: llmResponse.content,
+        timestamp: Date.now(),
+        conversationId: state.id
       };
       state.messages.push(assistantMessage);
 
-      return response;
+      return {
+        conversation: state,
+        model: llmResponse.model,
+        usage: llmResponse.usage
+      };
+
     } catch (error) {
-      throw new Error(`Failed to process message: ${error}`);
+      console.error('Error processing chat request:', error);
+      throw error;
     }
   }
 
-  private async processThroughTools(state: ConversationState, message: string): Promise<string[]> {
-    const responses: string[] = [];
-    
-    try {
-      // Process message through each registered tool
-      for (const toolName of state.tools) {
-        const tool = this.getTool(toolName);
-        if (tool) {
-          try {
-            const response = await tool.execute({
-              message,
-              context: state.context
-            });
-            
-            if (response) {
-              responses.push(response);
-              
-              // Update context with tool result
-              state.context[toolName] = {
-                lastResponse: response,
-                timestamp: new Date().toISOString()
-              };
-            }
-          } catch (toolError) {
-            console.error(`Tool ${toolName} execution failed:`, toolError);
-          }
-        }
-      }
-      
-      return responses;
-    } catch (error) {
-      throw new Error(`Failed to process tools: ${error}`);
+  // Initialize the provider
+  async initialize(): Promise<void> {
+    // Return existing initialization if in progress
+    if (this.initPromise) {
+      return this.initPromise;
     }
+
+    // Start new initialization
+    this.initPromise = (async () => {
+      try {
+        await this.llmProvider.initialize();
+        this.isInitialized = true;
+      } catch (error) {
+        this.isInitialized = false;
+        throw error;
+      } finally {
+        this.initPromise = null;
+      }
+    })();
+
+    return this.initPromise;
   }
 
-  private async generateResponse(state: ConversationState, toolResponses: string[]): Promise<string> {
-    try {
-      if (toolResponses.length === 0) {
-        // If no tool responses, check context for last operation
-        const lastOp = state.context.lastOperation;
-        if (lastOp && lastOp.result) {
-          return `Operation ${lastOp.name} completed successfully: ${JSON.stringify(lastOp.result)}`;
-        }
-        return 'I need more information to help with that.';
-      }
+  // Check if agent is initialized
+  public isReady(): boolean {
+    return this.isInitialized;
+  }
 
-      // Combine tool responses into a coherent message
-      return toolResponses
-        .filter(response => response && response.trim())
-        .join('\n\n');
-    } catch (error) {
-      throw new Error(`Failed to generate response: ${error}`);
-    }
+  // Update the configuration and reinitialize the provider
+  async updateConfig(config: ChatAgentConfig): Promise<void> {
+    this.isInitialized = false;
+    this.config = config;
+    this.provider = config.defaultProvider;
+    this.llmProvider = this.initializeProvider();
+    await this.initialize();
   }
 }

@@ -11,13 +11,17 @@ export function ChatInput({ onSendMessage, disabled }: ChatInputProps) {
   const [files, setFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const sendMessage = () => {
     if (message.trim() || files.length > 0) {
       onSendMessage(message, files);
       setMessage('');
       setFiles([]);
     }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    sendMessage();
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -46,7 +50,13 @@ export function ChatInput({ onSendMessage, disabled }: ChatInputProps) {
           <textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            placeholder="Type your message..."
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
+            placeholder="Type your message... (Press Enter to send, Shift+Enter for new line)"
             className="w-full bg-transparent border-0 focus:ring-0 resize-none"
             rows={1}
             disabled={disabled}

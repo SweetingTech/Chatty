@@ -1,32 +1,15 @@
-import { MCPClient, MCPTool, MCPResource } from '../../types/mcp';
-import { EventEmitter } from 'events';
+import { MCPClient, MCPTool, MCPResource, MCPServerConfig, MCPServerStatus } from '../../types/mcp';
 
-interface MCPServerConfig {
-  command: string;
-  args: string[];
-  env?: Record<string, string>;
-  disabled?: boolean;
-  autoApprove?: string[];
-}
-
-interface MCPServerStatus {
-  connected: boolean;
-  lastError?: string;
-  lastPing?: number;
-  tools: MCPTool[];
-  resources: MCPResource[];
-}
-
-export class MCPRegistry extends EventEmitter {
+export class MCPRegistry {
   private static instance: MCPRegistry;
-  private clients: Map<string, MCPClient> = new Map();
-  private serverConfigs: Map<string, MCPServerConfig> = new Map();
-  private serverStatus: Map<string, MCPServerStatus> = new Map();
-  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private clients: Map<string, MCPClient>;
+  private serverConfigs: Map<string, MCPServerConfig>;
+  private serverStatus: Map<string, MCPServerStatus & { lastPing: number }>;
 
   private constructor() {
-    super();
-    this.startHealthCheck();
+    this.clients = new Map();
+    this.serverConfigs = new Map();
+    this.serverStatus = new Map();
   }
 
   public static getInstance(): MCPRegistry {
@@ -39,83 +22,65 @@ export class MCPRegistry extends EventEmitter {
   // Client Management
   public registerClient(client: MCPClient): void {
     if (this.clients.has(client.name)) {
-      throw new Error(`MCP client with name ${client.name} already registered`);
+      throw new Error(`Client ${client.name} is already registered`);
     }
     this.clients.set(client.name, client);
-    this.emit('clientRegistered', client.name);
   }
 
-  public getClient(name: string): MCPClient | undefined {
-    return this.clients.get(name);
+  public unregisterClient(clientName: string): boolean {
+    return this.clients.delete(clientName);
+  }
+
+  public getClient(clientName: string): MCPClient | undefined {
+    return this.clients.get(clientName);
   }
 
   public listClients(): MCPClient[] {
     return Array.from(this.clients.values());
   }
 
-  public unregisterClient(name: string): boolean {
-    const result = this.clients.delete(name);
-    if (result) {
-      this.emit('clientUnregistered', name);
-    }
-    return result;
+  // Server Configuration
+  public setServerConfig(serverName: string, config: MCPServerConfig): void {
+    this.serverConfigs.set(serverName, config);
   }
 
-  // Server Configuration Management
-  public setServerConfig(name: string, config: MCPServerConfig): void {
-    this.serverConfigs.set(name, config);
-    this.emit('serverConfigUpdated', name);
+  public removeServerConfig(serverName: string): boolean {
+    return this.serverConfigs.delete(serverName);
   }
 
-  public getServerConfig(name: string): MCPServerConfig | undefined {
-    return this.serverConfigs.get(name);
+  public getServerConfig(serverName: string): MCPServerConfig | undefined {
+    return this.serverConfigs.get(serverName);
   }
 
   public listServerConfigs(): Map<string, MCPServerConfig> {
     return new Map(this.serverConfigs);
   }
 
-  public removeServerConfig(name: string): boolean {
-    const result = this.serverConfigs.delete(name);
-    if (result) {
-      this.emit('serverConfigRemoved', name);
-    }
-    return result;
-  }
-
-  // Server Status Management
-  public updateServerStatus(name: string, status: Partial<MCPServerStatus>): void {
-    const currentStatus = this.serverStatus.get(name) || {
-      connected: false,
-      tools: [],
-      resources: []
-    };
-    
-    this.serverStatus.set(name, {
-      ...currentStatus,
+  // Server Status
+  public updateServerStatus(serverName: string, status: MCPServerStatus): void {
+    this.serverStatus.set(serverName, {
       ...status,
       lastPing: Date.now()
     });
-
-    this.emit('serverStatusUpdated', name);
   }
 
-  public getServerStatus(name: string): MCPServerStatus | undefined {
-    return this.serverStatus.get(name);
+  public getServerStatus(serverName: string): (MCPServerStatus & { lastPing: number }) | undefined {
+    return this.serverStatus.get(serverName);
   }
 
-  public listServerStatus(): Map<string, MCPServerStatus> {
+  public listServerStatus(): Map<string, MCPServerStatus & { lastPing: number }> {
     return new Map(this.serverStatus);
   }
 
   // Tool Management
   public getAvailableTools(serverName: string): MCPTool[] {
-    return this.serverStatus.get(serverName)?.tools || [];
+    const status = this.serverStatus.get(serverName);
+    return status?.tools || [];
   }
 
   public findToolByName(toolName: string): { server: string; tool: MCPTool } | undefined {
     for (const [server, status] of this.serverStatus) {
-      const tool = status.tools.find(t => t.name === toolName);
+      const tool = status.tools.find((t: MCPTool) => t.name === toolName);
       if (tool) {
         return { server, tool };
       }
@@ -125,12 +90,13 @@ export class MCPRegistry extends EventEmitter {
 
   // Resource Management
   public getAvailableResources(serverName: string): MCPResource[] {
-    return this.serverStatus.get(serverName)?.resources || [];
+    const status = this.serverStatus.get(serverName);
+    return status?.resources || [];
   }
 
   public findResourceByUri(uri: string): { server: string; resource: MCPResource } | undefined {
     for (const [server, status] of this.serverStatus) {
-      const resource = status.resources.find(r => r.uri === uri);
+      const resource = status.resources.find((r: MCPResource) => r.uri === uri);
       if (resource) {
         return { server, resource };
       }
@@ -138,40 +104,14 @@ export class MCPRegistry extends EventEmitter {
     return undefined;
   }
 
-  // Health Check System
-  private startHealthCheck(): void {
-    if (this.healthCheckInterval) {
-      clearInterval(this.healthCheckInterval);
-    }
-
-    this.healthCheckInterval = setInterval(() => {
-      const now = Date.now();
-      for (const [name, status] of this.serverStatus) {
-        if (status.lastPing && now - status.lastPing > 30000) { // 30 seconds timeout
-          this.updateServerStatus(name, {
-            connected: false,
-            lastError: 'Server health check timeout'
-          });
-        }
-      }
-    }, 10000); // Check every 10 seconds
-  }
-
   // Operation Approval
   public isOperationAutoApproved(serverName: string, operation: string): boolean {
     const config = this.serverConfigs.get(serverName);
-    return config?.autoApprove?.includes(operation) || false;
-  }
-
-  // Cleanup
-  public dispose(): void {
-    if (this.healthCheckInterval) {
-      clearInterval(this.healthCheckInterval);
-      this.healthCheckInterval = null;
+    if (!config || !config.autoApprove) {
+      return false;
     }
-    this.removeAllListeners();
-    this.clients.clear();
-    this.serverConfigs.clear();
-    this.serverStatus.clear();
+    return config.autoApprove.includes(operation);
   }
 }
+
+export const mcpRegistry = MCPRegistry.getInstance();

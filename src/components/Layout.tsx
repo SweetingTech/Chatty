@@ -16,22 +16,28 @@ const navItems = [
   { path: '/settings', icon: Settings, label: 'Settings' },
 ];
 
-export function Layout({ children }: { children: React.ReactNode }) {
+const getSystemStatus = (settings: any, activeAgents: number) => {
+  if (!settings.lmStudioUrl && !settings.openaiKey && !settings.claudeKey) {
+    return { color: 'text-red-500', message: 'No LLM configured' };
+  }
+  if (activeAgents > 0) {
+    return { color: 'text-green-500', message: `${activeAgents} agents running` };
+  }
+  return { color: 'text-yellow-500', message: 'System idle' };
+};
+
+function LayoutComponent({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const { settings, agents } = useAppStore();
-  const activeAgents = agents.filter(a => a.config.status === 'running').length;
+  const activeAgents = React.useMemo(() => 
+    agents.filter(a => a.config.status === 'running').length,
+    [agents]
+  );
 
-  const getSystemStatus = () => {
-    if (!settings.lmStudioUrl && !settings.openaiKey && !settings.claudeKey) {
-      return { color: 'text-red-500', message: 'No LLM configured' };
-    }
-    if (activeAgents > 0) {
-      return { color: 'text-green-500', message: `${activeAgents} agents running` };
-    }
-    return { color: 'text-yellow-500', message: 'System idle' };
-  };
-
-  const status = getSystemStatus();
+  const status = React.useMemo(() => 
+    getSystemStatus(settings, activeAgents),
+    [settings.lmStudioUrl, settings.openaiKey, settings.claudeKey, activeAgents]
+  );
 
   return (
     <div className="flex h-screen bg-gray-100">
@@ -78,3 +84,5 @@ export function Layout({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
+export const Layout = React.memo(LayoutComponent);

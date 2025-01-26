@@ -3,26 +3,98 @@ import { useAppStore } from '../store';
 import { ChatSidebar } from '../components/ChatSidebar';
 import { ChatMessage } from '../components/ChatMessage';
 import { ChatInput } from '../components/ChatInput';
-import { mcp } from '../lib/mcp';
-import { setupRootMCPs } from '../lib/mcp/providers';
-import { chromadb } from '../lib/chromadb';
+import { ChatAgent, type ChatAgentConfig } from '../lib/agents/chat';
+import type { ProviderType } from '../types';
 
-export function ChatPage() {
+// Internal component with all the logic
+function ChatPageComponent() {
   const {
     currentChatId,
     chatSessions,
     addChatSession,
     updateChatSession,
     settings,
-    serviceStatus,
+    llmConfigs,
   } = useAppStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const mcpRef = useRef<ReturnType<typeof setupRootMCPs>>();
+  const chatAgentRef = useRef<ChatAgent>();
 
+  // Track initialization state
+  const initializingRef = useRef(false);
+  const mountedRef = useRef(false);
+  const [initError, setInitError] = React.useState<string | null>(null);
+
+  // Initialize and update chat agent when configs change
   useEffect(() => {
-    // Initialize root MCPs
-    mcpRef.current = setupRootMCPs();
-  }, []);
+    // Skip initialization if already mounted (for StrictMode double-mount)
+    if (mountedRef.current) return;
+    mountedRef.current = true;
+
+    const initializeAgent = async () => {
+      // Prevent multiple simultaneous initializations
+      if (initializingRef.current) {
+        console.log('Already initializing chat agent, skipping...');
+        return;
+      }
+
+      try {
+        initializingRef.current = true;
+        setInitError(null);
+
+        const defaultProviderEntry = Object.entries(llmConfigs).find(
+          ([_, config]) => config.isDefault
+        );
+
+        if (!defaultProviderEntry || !llmConfigs[defaultProviderEntry[0] as ProviderType].enabled) {
+          throw new Error('No default provider set or provider is disabled');
+        }
+
+        const defaultProvider = defaultProviderEntry[0] as ProviderType;
+        console.log('Initializing chat agent with provider:', defaultProvider);
+
+        // Only create new agent if we don't have one or if the provider changed
+        if (!chatAgentRef.current || chatAgentRef.current.getProviderInfo().provider !== defaultProvider) {
+          console.log('Creating new chat agent instance...');
+          
+          const config: ChatAgentConfig = {
+            defaultProvider,
+            llmConfig: llmConfigs[defaultProvider]
+          };
+
+          const agent = new ChatAgent(config);
+          await agent.initialize();
+          chatAgentRef.current = agent;
+
+          const providerInfo = agent.getProviderInfo();
+          const configInfo = agent.getConfigInfo();
+          console.log('Chat agent successfully initialized:', {
+            provider: defaultProvider,
+            providerInfo,
+            configInfo
+          });
+        } else {
+          console.log('Reusing existing chat agent instance');
+        }
+      } catch (error) {
+        console.error('Failed to initialize chat agent:', error);
+        setInitError(error instanceof Error ? error.message : 'Failed to initialize chat agent');
+        chatAgentRef.current = undefined;
+      } finally {
+        initializingRef.current = false;
+      }
+    };
+
+    initializeAgent();
+
+    // Cleanup function - only clear on actual unmount
+    return () => {
+      if (!mountedRef.current) return; // Skip cleanup if not actually mounted
+      console.log('Component unmounting, cleaning up chat agent');
+      chatAgentRef.current = undefined;
+      initializingRef.current = false;
+      mountedRef.current = false;
+    };
+  }, [llmConfigs]); // Only depend on llmConfigs
 
   const currentChat = chatSessions.find((s) => s.id === currentChatId);
 
@@ -30,10 +102,18 @@ export function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentChat?.messages]);
 
-  const handleSendMessage = async (content: string, files?: File[]) => {
-    if (!currentChatId) {
+  const handleSendMessage = async (content: string) => {
+    if (!chatAgentRef.current) {
+      console.error('Chat agent not initialized');
+      return;
+    }
+
+    // Create new session if none exists
+    let sessionId = currentChatId;
+    if (!sessionId) {
+      sessionId = crypto.randomUUID();
       const newSession = {
-        id: crypto.randomUUID(),
+        id: sessionId,
         title: content.slice(0, 30) + (content.length > 30 ? '...' : ''),
         messages: [],
         createdAt: Date.now(),
@@ -42,92 +122,108 @@ export function ChatPage() {
       addChatSession(newSession);
     }
 
-    const newMessage = {
+    // Add user message immediately to show it in the UI
+    const userMessage = {
       id: crypto.randomUUID(),
       role: 'user' as const,
       content,
       timestamp: Date.now(),
+      conversationId: sessionId,
     };
-
-    const updatedMessages = [...(currentChat?.messages || []), newMessage];
-
-    updateChatSession(currentChatId!, {
-      messages: updatedMessages,
+    updateChatSession(sessionId, {
+      messages: [...(currentChat?.messages || []), userMessage],
       updatedAt: Date.now(),
     });
 
-    // Only save to ChromaDB if it's online
-    if (serviceStatus.chromadb === 'online') {
-      try {
-        await chromadb.saveChatSession(currentChatId!, updatedMessages);
-      } catch (error) {
-        console.error('Failed to save chat session to ChromaDB:', error);
+    try {
+      // Process message through chat agent
+      console.log('Sending message to agent:', { 
+        sessionId, 
+        content,
+        providerInfo: chatAgentRef.current.getProviderInfo(),
+        configInfo: chatAgentRef.current.getConfigInfo()
+      });
+
+      const agentResponse = await chatAgentRef.current.handleRequest({
+        payload: {
+          conversationId: sessionId,
+          message: content,
+        }
+      });
+
+      console.log('Received agent response:', agentResponse);
+
+      if (agentResponse.success) {
+        // Update chat session with the conversation from the agent
+        updateChatSession(sessionId, {
+          messages: agentResponse.data.conversation.messages,
+          updatedAt: Date.now(),
+        });
+      } else {
+        // Add error message to the chat
+        const errorMessage = {
+          id: crypto.randomUUID(),
+          role: 'assistant' as const,
+          content: `Error: ${agentResponse.error || 'Failed to process message'}`,
+          timestamp: Date.now(),
+          conversationId: sessionId,
+        };
+        updateChatSession(sessionId, {
+          messages: [...(currentChat?.messages || []), errorMessage],
+          updatedAt: Date.now(),
+        });
+        console.error('Agent processing failed:', agentResponse.error);
       }
-    }
-
-    // Route through appropriate MCP based on settings
-    let selectedMCP = mcpRef.current?.lmStudioMCP;
-    if (settings.openaiKey) {
-      selectedMCP = mcpRef.current?.openAIMCP;
-    } else if (settings.claudeKey) {
-      selectedMCP = mcpRef.current?.claudeMCP;
-    }
-
-    if (selectedMCP) {
-      // Add to MCP context
-      mcp.updateContext(selectedMCP.id, { context: [...selectedMCP.context, content] });
-      
-      // Get response through MCP
-      const mcpResponse = mcp.addResponse(selectedMCP.id, 'This is a placeholder response. LLM integration coming soon...');
-
-      // Update chat with MCP response
-      const llmResponse = {
+    } catch (error) {
+      // Add error message to the chat
+      const errorMessage = {
         id: crypto.randomUUID(),
         role: 'assistant' as const,
-        content: mcpResponse.content,
+        content: `Error: ${error instanceof Error ? error.message : 'Failed to process message'}`,
         timestamp: Date.now(),
+        conversationId: sessionId,
       };
-
-      updateChatSession(currentChatId!, {
-        messages: [...updatedMessages, llmResponse],
+      updateChatSession(sessionId, {
+        messages: [...(currentChat?.messages || []), errorMessage],
         updatedAt: Date.now(),
       });
+      console.error('Failed to process message through agent:', error);
     }
   };
-
-  if (!currentChatId) {
-    return (
-      <div className="h-full flex">
-        <ChatSidebar />
-        <div className="flex-1 flex items-center justify-center bg-gray-50">
-          <div className="text-center">
-            <h2 className="text-xl font-semibold text-gray-700">
-              Welcome to Multi-LLM Chat
-            </h2>
-            <p className="mt-2 text-gray-500">
-              Select a chat from the sidebar or start a new one
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="h-full flex">
       <ChatSidebar />
       <div className="flex-1 flex flex-col">
-        <div className="flex-1 overflow-y-auto">
-          {currentChat?.messages.map((message) => (
-            <ChatMessage key={message.id} message={message} />
-          ))}
-          <div ref={messagesEndRef} />
-        </div>
-        <ChatInput
-          onSendMessage={handleSendMessage}
-          disabled={!settings.lmStudioUrl && !settings.openaiKey && !settings.claudeKey}
-        />
+        {currentChatId ? (
+          <>
+            <div className="flex-1 overflow-y-auto">
+              {currentChat?.messages.map((message) => (
+                <ChatMessage key={message.id} message={message} />
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+            <ChatInput
+              onSendMessage={handleSendMessage}
+              disabled={!chatAgentRef.current}
+            />
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center bg-gray-50">
+            <div className="text-center">
+              <h2 className="text-xl font-semibold text-gray-700">
+                Welcome to Multi-LLM Chat
+              </h2>
+              <p className="mt-2 text-gray-500">
+                Select a chat from the sidebar or start a new one
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
+// Export memoized version to prevent unnecessary re-renders
+export const ChatPage = React.memo(ChatPageComponent);

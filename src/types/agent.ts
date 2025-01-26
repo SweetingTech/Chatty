@@ -1,22 +1,31 @@
-import { MCPOperation } from './mcp';
+import { MCPClient } from './mcp';
+import { Tool } from '../types/tool';
+
+export type AgentType = 'chat' | 'router' | 'builder' | 'task' | 'integration' | 'learning';
+
+export type AgentStatus = 'running' | 'stopped' | 'error';
 
 export interface AgentConfig {
-  id: string;
-  name: string;
-  description?: string;
-  enabled: boolean;
-  settings?: Record<string, any>;
+  status: AgentStatus;
+  mcpClient: MCPClient;
+  tools: Tool[];
+  [key: string]: any;
 }
 
-export interface AgentContext {
-  message: string;
-  metadata?: Record<string, any>;
-  timestamp?: number;
+export interface Agent {
+  id: string;
+  name: string;
+  type: AgentType;
+  description: string;
+  config: AgentConfig;
 }
 
 export interface AgentRequest {
-  operation: MCPOperation;
-  payload: any;
+  operation?: {
+    toolName: string;
+    args: Record<string, any>;
+  };
+  payload?: any;
 }
 
 export interface AgentResponse {

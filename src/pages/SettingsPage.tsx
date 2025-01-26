@@ -1,7 +1,7 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect, useCallback } from 'react';
 import { useAppStore } from '../store';
 import { SaveButton } from '../components/SaveButton';
-import type { LLMProvider } from '../types';
+import type { ProviderType } from '../types';
 
 export function SettingsPage() {
   const {
@@ -17,17 +17,49 @@ export function SettingsPage() {
 
   const currentSettings = draftSettings || settings;
 
-  const handleSetDefault = (provider: LLMProvider) => {
+  // Update LM Studio settings when host/port or URL changes
+  useEffect(() => {
+    if (currentSettings.lmStudioHost && currentSettings.lmStudioPort) {
+      const url = `http://${currentSettings.lmStudioHost}:${currentSettings.lmStudioPort}`;
+      if (currentSettings.lmStudioUrl !== url) {
+        updateDraftSettings({ lmStudioUrl: url });
+      }
+      updateLLMConfig('lm-studio', {
+        host: currentSettings.lmStudioHost,
+        port: currentSettings.lmStudioPort
+      } as any);
+    } else if (currentSettings.lmStudioUrl) {
+      try {
+        const url = new URL(currentSettings.lmStudioUrl);
+        const host = url.hostname;
+        const port = url.port;
+        if (host && port) {
+          updateDraftSettings({
+            lmStudioHost: host,
+            lmStudioPort: port
+          });
+          updateLLMConfig('lm-studio', {
+            host: host,
+            port: port
+          } as any);
+        }
+      } catch (error) {
+        console.error('Invalid LM Studio URL:', error);
+      }
+    }
+  }, [currentSettings.lmStudioHost, currentSettings.lmStudioPort, currentSettings.lmStudioUrl, updateDraftSettings, updateLLMConfig]);
+
+  const handleSetDefault = useCallback((provider: ProviderType) => {
     setDefaultProvider(provider);
-  };
+  }, [setDefaultProvider]);
 
-  const handleToggleProvider = (provider: LLMProvider, enabled: boolean) => {
+  const handleToggleProvider = useCallback((provider: ProviderType, enabled: boolean) => {
     updateLLMConfig(provider, { enabled });
-  };
+  }, [updateLLMConfig]);
 
-  const handleUpdateApiKey = (provider: LLMProvider, apiKey: string) => {
+  const handleUpdateApiKey = useCallback((provider: ProviderType, apiKey: string) => {
     updateLLMConfig(provider, { apiKey });
-  };
+  }, [updateLLMConfig]);
 
   return (
     <div className="h-full">
@@ -44,7 +76,7 @@ export function SettingsPage() {
                 </label>
                 <input
                   type="text"
-                  value={currentSettings.lmStudioUrl}
+                  value={currentSettings?.lmStudioUrl || ''}
                   onChange={(e) => updateDraftSettings({ lmStudioUrl: e.target.value })}
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 />
@@ -56,7 +88,7 @@ export function SettingsPage() {
                 </label>
                 <input
                   type="text"
-                  value={currentSettings.weaviateUrl}
+                  value={currentSettings?.weaviateUrl || ''}
                   onChange={(e) => updateDraftSettings({ weaviateUrl: e.target.value })}
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 />
@@ -74,7 +106,7 @@ export function SettingsPage() {
                   <div className="flex items-center space-x-2">
                     <input
                       type="checkbox"
-                      checked={llmConfigs.openai.enabled}
+                      checked={llmConfigs?.openai?.enabled ?? false}
                       onChange={(e) => handleToggleProvider('openai', e.target.checked)}
                       className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                     />
@@ -83,24 +115,23 @@ export function SettingsPage() {
                   <button
                     type="button"
                     onClick={() => handleSetDefault('openai')}
-                    disabled={!llmConfigs.openai.enabled}
+                    disabled={!llmConfigs?.openai?.enabled}
                     className={`px-3 py-1 text-sm rounded-full ${
-                      llmConfigs.openai.isDefault
+                      llmConfigs?.openai?.isDefault
                         ? 'bg-blue-100 text-blue-800'
                         : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
                     } disabled:opacity-50`}
                   >
-                    {llmConfigs.openai.isDefault ? 'Default' : 'Set as Default'}
+                    {llmConfigs?.openai?.isDefault ? 'Default' : 'Set as Default'}
                   </button>
                 </div>
-                <input
-                  type="password"
-                  value={llmConfigs.openai.apiKey || ''}
-                  onChange={(e) => handleUpdateApiKey('openai', e.target.value)}
-                  placeholder="OpenAI API Key"
-                  disabled={!llmConfigs.openai.enabled}
-                  className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100"
-                />
+                    <input
+                      type="password"
+                      value={llmConfigs?.openai?.apiKey || ''}
+                      onChange={(e) => handleUpdateApiKey('openai', e.target.value)}
+                      placeholder="OpenAI API Key"
+                      className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    />
               </div>
 
               {/* Claude */}
@@ -109,7 +140,7 @@ export function SettingsPage() {
                   <div className="flex items-center space-x-2">
                     <input
                       type="checkbox"
-                      checked={llmConfigs.claude.enabled}
+                      checked={llmConfigs?.claude?.enabled ?? false}
                       onChange={(e) => handleToggleProvider('claude', e.target.checked)}
                       className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                     />
@@ -118,24 +149,23 @@ export function SettingsPage() {
                   <button
                     type="button"
                     onClick={() => handleSetDefault('claude')}
-                    disabled={!llmConfigs.claude.enabled}
+                    disabled={!llmConfigs?.claude?.enabled}
                     className={`px-3 py-1 text-sm rounded-full ${
-                      llmConfigs.claude.isDefault
+                      llmConfigs?.claude?.isDefault
                         ? 'bg-blue-100 text-blue-800'
                         : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
                     } disabled:opacity-50`}
                   >
-                    {llmConfigs.claude.isDefault ? 'Default' : 'Set as Default'}
+                    {llmConfigs?.claude?.isDefault ? 'Default' : 'Set as Default'}
                   </button>
                 </div>
-                <input
-                  type="password"
-                  value={llmConfigs.claude.apiKey || ''}
-                  onChange={(e) => handleUpdateApiKey('claude', e.target.value)}
-                  placeholder="Claude API Key"
-                  disabled={!llmConfigs.claude.enabled}
-                  className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100"
-                />
+                    <input
+                      type="password"
+                      value={llmConfigs?.claude?.apiKey || ''}
+                      onChange={(e) => handleUpdateApiKey('claude', e.target.value)}
+                      placeholder="Claude API Key"
+                      className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    />
               </div>
 
               {/* LM Studio */}
@@ -144,7 +174,7 @@ export function SettingsPage() {
                   <div className="flex items-center space-x-2">
                     <input
                       type="checkbox"
-                      checked={llmConfigs['lm-studio'].enabled}
+                      checked={llmConfigs?.['lm-studio']?.enabled ?? false}
                       onChange={(e) => handleToggleProvider('lm-studio', e.target.checked)}
                       className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                     />
@@ -153,16 +183,66 @@ export function SettingsPage() {
                   <button
                     type="button"
                     onClick={() => handleSetDefault('lm-studio')}
-                    disabled={!llmConfigs['lm-studio'].enabled}
+                    disabled={!llmConfigs?.['lm-studio']?.enabled}
                     className={`px-3 py-1 text-sm rounded-full ${
-                      llmConfigs['lm-studio'].isDefault
+                      llmConfigs?.['lm-studio']?.isDefault
                         ? 'bg-blue-100 text-blue-800'
                         : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
                     } disabled:opacity-50`}
                   >
-                    {llmConfigs['lm-studio'].isDefault ? 'Default' : 'Set as Default'}
+                    {llmConfigs?.['lm-studio']?.isDefault ? 'Default' : 'Set as Default'}
                   </button>
                 </div>
+                <div className="mt-2 space-y-2">
+                  <input
+                    type="text"
+                    value={currentSettings?.lmStudioHost || ''}
+                    onChange={(e) => updateDraftSettings({ lmStudioHost: e.target.value })}
+                    placeholder="Host (e.g., localhost)"
+                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
+                  <input
+                    type="text"
+                    value={currentSettings?.lmStudioPort || ''}
+                    onChange={(e) => updateDraftSettings({ lmStudioPort: e.target.value })}
+                    placeholder="Port (e.g., 1234)"
+                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Deepseek */}
+              <div className="border rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      checked={llmConfigs?.deepseek?.enabled ?? false}
+                      onChange={(e) => handleToggleProvider('deepseek', e.target.checked)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <h3 className="font-medium">Deepseek</h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleSetDefault('deepseek')}
+                    disabled={!llmConfigs?.deepseek?.enabled}
+                    className={`px-3 py-1 text-sm rounded-full ${
+                      llmConfigs?.deepseek?.isDefault
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                    } disabled:opacity-50`}
+                  >
+                    {llmConfigs?.deepseek?.isDefault ? 'Default' : 'Set as Default'}
+                  </button>
+                </div>
+                    <input
+                      type="password"
+                      value={llmConfigs?.deepseek?.apiKey || ''}
+                      onChange={(e) => handleUpdateApiKey('deepseek', e.target.value)}
+                      placeholder="Deepseek API Key"
+                      className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    />
               </div>
             </div>
           </div>
@@ -175,7 +255,7 @@ export function SettingsPage() {
                 Theme
               </label>
               <select
-                value={currentSettings.theme}
+                value={currentSettings?.theme || 'light'}
                 onChange={(e) =>
                   updateDraftSettings({ theme: e.target.value as 'light' | 'dark' })
                 }
@@ -196,7 +276,7 @@ export function SettingsPage() {
               </label>
               <input
                 type="password"
-                value={currentSettings.braveApiKey || ''}
+                value={currentSettings?.braveApiKey || ''}
                 onChange={(e) => updateDraftSettings({ braveApiKey: e.target.value })}
                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
               />

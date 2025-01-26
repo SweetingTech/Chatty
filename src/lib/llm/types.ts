@@ -4,6 +4,8 @@ export interface LLMMessage {
   name?: string; // For function messages
 }
 
+export type ProviderType = 'lm-studio' | 'openai' | 'claude' | 'deepseek' | 'none';
+
 export interface LLMConfig {
   model?: string;
   temperature?: number;
@@ -94,25 +96,35 @@ export interface LLMProviderFactory {
 
 // Provider-specific types
 
-export interface OpenAIConfig {
+export interface OpenAIConfig extends LLMConfig {
+  provider: ProviderType;
+  enabled: boolean;
+  isDefault?: boolean;
   apiKey: string;
-  model?: string;
   organization?: string;
 }
 
-export interface ClaudeConfig {
+export interface ClaudeConfig extends LLMConfig {
+  provider: ProviderType;
+  enabled: boolean;
+  isDefault?: boolean;
   apiKey: string;
-  model?: string;
 }
 
-export interface LMStudioConfig {
-  baseUrl: string;
-  model?: string;
+export interface LMStudioConfig extends LLMConfig {
+  provider: ProviderType;
+  enabled: boolean;
+  isDefault?: boolean;
+  baseUrl?: string;
+  host?: string;
+  port?: string | number;
 }
 
-export interface DeepseekConfig {
+export interface DeepseekConfig extends LLMConfig {
+  provider: ProviderType;
+  enabled: boolean;
+  isDefault?: boolean;
   apiKey: string;
-  model?: string;
   baseUrl?: string;
 }
 

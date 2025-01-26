@@ -1,17 +1,26 @@
 import weaviate, { WeaviateClient, ApiKey } from 'weaviate-ts-client';
 import { useAppStore } from '../store';
 
-interface DocumentMetadata {
+export interface DocumentMetadata {
   createdAt: number;
   type: string;
   tags?: string[];
 }
 
-interface Document {
+export interface Document {
   title: string;
   content: string;
   vector?: number[];
   metadata: DocumentMetadata;
+  _additional?: {
+    id: string;
+  };
+}
+
+export interface WeaviateDocument extends Document {
+  _additional: {
+    id: string;
+  };
 }
 
 class WeaviateService {
