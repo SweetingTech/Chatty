@@ -6,87 +6,102 @@ import type {
   LLMStreamCallbacks,
   LMStudioConfig
 } from '../types';
+import { chromadb } from '../../chromadb';
+
+interface ModelConfig {
+  contextWindow: number;
+  maxOutputTokens: number;
+  supportsFunctionCalling: boolean;
+  supportsVision: boolean;
+  supportsJson: boolean;
+  supportsReasoning: boolean;
+}
 
 class LMStudioProvider implements LLMProvider {
   public id = 'lm-studio';
   public name = 'LM Studio';
-  public description = 'Local LLM inference using LM Studio';
+  public description = 'Local LM Studio models';
   public capabilities = {
     chat: true,
     completion: true,
     streaming: true,
-    functionCalling: false,
+    functionCalling: true,
     embeddings: false
   };
-  public models: string[] = [];
-  public maxTokens = 4096;
 
-  private baseUrl: string;
-  private currentModel: string | null = null;
+  private modelConfigs: Record<string, ModelConfig> = {};
+  public models: string[] = [];
+  public maxTokens = 32768;
+
+  private currentModel: string = '';
+  private currentSessionId: string | null = null;
+  private onModelUpdate?: (modelId: string) => void;
 
   constructor(config: LMStudioConfig) {
-    // Build baseUrl from host and port if provided, otherwise use baseUrl
-    if (config.host && config.port) {
-      this.baseUrl = `http://${config.host}:${config.port}`;
-    } else {
-      this.baseUrl = config.baseUrl || 'http://localhost:1234';
+    this.onModelUpdate = config.onModelUpdate;
+  }
+
+  private getModelConfig(model: string | undefined): ModelConfig {
+    if (!model || !this.modelConfigs[model]) {
+      // If no model specified or invalid model, use the current model
+      if (!this.currentModel || !this.modelConfigs[this.currentModel]) {
+        throw new Error('No valid model available. Please ensure LM Studio is running and has a model loaded.');
+      }
+      return this.modelConfigs[this.currentModel];
     }
-    if (config.model) {
-      this.currentModel = config.model;
-    }
+    return this.modelConfigs[model];
   }
 
   public async initialize(): Promise<void> {
     try {
-      console.log('Initializing LM Studio provider...', {
-        baseUrl: this.baseUrl,
-        currentModel: this.currentModel
-      });
-
-      // First check if LM Studio is accessible
-      try {
-        const healthCheck = await fetch(this.baseUrl);
-        console.log('LM Studio health check:', {
-          status: healthCheck.status,
-          ok: healthCheck.ok
-        });
-      } catch (error) {
-        console.error('LM Studio health check failed:', error);
-        throw new Error(`Failed to connect to LM Studio at ${this.baseUrl}`);
+      // Fetch available models from FastAPI
+      const response = await fetch('http://localhost:8001/lmstudio/models');
+      if (response.status < 200 || response.status >= 300) {
+        const errorDetails = await response.text();
+        throw new Error(`Failed to fetch models. HTTP ${response.status}: ${errorDetails}`);
       }
 
-      // Get available models
-      const models = await this.listModels();
-      console.log('Available models:', models);
-
-      if (models.length === 0) {
-        throw new Error('No models available in LM Studio. Please load a model first.');
+      const data = await response.json();
+      console.log('Raw LM Studio models response:', data);
+      if (!data.models || !Array.isArray(data.models)) {
+        throw new Error('Invalid response format from LM Studio API');
       }
 
-      // If no model is set, use the first available one
-      if (!this.currentModel) {
-        console.log('No model configured, setting default model:', models[0]);
-        await this.setModel(models[0]);
-      } else {
-        // If model is set, verify it exists
-        if (!models.includes(this.currentModel)) {
-          console.log('Configured model not found:', this.currentModel);
-          console.log('Available models:', models);
-          console.log('Using first available model:', models[0]);
-          await this.setModel(models[0]);
-        } else {
-          console.log('Using configured model:', this.currentModel);
-          await this.setModel(this.currentModel); // Re-set to verify it works
+      // Clear existing configs
+      this.modelConfigs = {};
+      
+      // Update our models list with models from the API
+      const apiModels = data.models.map((model: any) => model.id);
+      console.log('Available LM Studio models:', apiModels);
+
+      for (const modelId of apiModels) {
+        // Add new model with default capabilities
+        this.modelConfigs[modelId] = {
+          contextWindow: 32768,
+          maxOutputTokens: 8192,
+          supportsFunctionCalling: true,
+          supportsVision: false,
+          supportsJson: true,
+          supportsReasoning: false
+        };
+      }
+      
+      // Update models list
+      this.models = Object.keys(this.modelConfigs);
+
+      if (this.models.length === 0) {
+        throw new Error('No models available in LM Studio');
+      }
+
+      // Set current model to first available if none set
+      if (!this.currentModel || !this.modelConfigs[this.currentModel]) {
+        this.currentModel = this.models[0];
+        console.log('Setting current model to:', this.currentModel);
+        
+        // Notify store of model update
+        if (this.onModelUpdate) {
+          this.onModelUpdate(this.currentModel);
         }
-      }
-
-      // Verify the model is working with a test request
-      try {
-        const testResponse = await this.chat([{ role: 'user', content: 'test' }]);
-        console.log('Model test successful:', testResponse);
-      } catch (error) {
-        console.error('Model test failed:', error);
-        throw new Error('Failed to verify model is working');
       }
 
     } catch (error) {
@@ -96,125 +111,85 @@ class LMStudioProvider implements LLMProvider {
   }
 
   public async listModels(): Promise<string[]> {
-    console.log('Fetching models from LM Studio...');
-    const response = await fetch(`${this.baseUrl}/v1/models`);
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Failed to list models:', {
-        status: response.status,
-        statusText: response.statusText,
-        error: errorText
-      });
-      throw new Error(`Failed to list models: ${response.statusText}. Details: ${errorText}`);
-    }
-
-    const data = await response.json();
-    console.log('Received models from LM Studio:', data);
-    
-    this.models = data.data.map((model: any) => model.id);
     return this.models;
   }
 
   public async setModel(modelId: string): Promise<void> {
-    if (!this.models.includes(modelId)) {
-      const models = await this.listModels();
-      if (!models.includes(modelId)) {
-        throw new Error(`Model ${modelId} not found`);
-      }
+    if (!this.modelConfigs[modelId]) {
+      throw new Error(`Model ${modelId} not found or not supported`);
     }
     this.currentModel = modelId;
   }
 
-  private async ensureConnection(): Promise<void> {
-    try {
-      const response = await fetch(this.baseUrl);
-      if (!response.ok) {
-        throw new Error(`LM Studio is not accessible at ${this.baseUrl}`);
-      }
-    } catch (error) {
-      console.error('Failed to connect to LM Studio:', error);
-      throw new Error(`Failed to connect to LM Studio at ${this.baseUrl}`);
-    }
+  public setSessionId(sessionId: string): void {
+    this.currentSessionId = sessionId;
   }
 
   public async chat(messages: LLMMessage[], config?: LLMConfig): Promise<LLMResponse> {
-    console.log('LMStudioProvider chat called with:', {
-      messages,
-      config,
-      currentModel: this.currentModel,
-      baseUrl: this.baseUrl
-    });
+    const model = config?.model || this.currentModel || this.models[0];
+    const modelConfig = this.getModelConfig(model);
+
+    // Check cache if session ID is set
+    if (this.currentSessionId) {
+      const cachedResponse = await chromadb.getCachedResponse(
+        this.currentSessionId,
+        JSON.stringify(messages),
+        config?.tools,
+        config?.mcp
+      );
+      if (cachedResponse) {
+        return JSON.parse(cachedResponse);
+      }
+    }
 
     try {
-      // Ensure connection is active
-      await this.ensureConnection();
-
-      // Verify model is still valid
-      const models = await this.listModels();
-      if (!models.includes(this.currentModel!)) {
-        console.warn('Current model no longer available, reinitializing...');
-        await this.initialize();
-      }
-
-      const requestBody = {
-        messages,
-        model: config?.model || this.currentModel,
+      const requestPayload = {
+        messages: messages.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+          name: msg.name || undefined
+        })),
+        model,
         temperature: config?.temperature ?? 0.7,
-        max_tokens: config?.max_tokens ?? this.maxTokens,
-        stream: false,
-        // Add parameters to help maintain connection
-        keep_alive: true,
-        timeout: 30000
+        max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
+        tools: config?.tools,
+        tool_choice: config?.tool_choice,
+        response_format: modelConfig.supportsJson && config?.response_format ? config.response_format : undefined
       };
 
-      console.log('Sending request to LM Studio:', {
-        url: `${this.baseUrl}/v1/chat/completions`,
-        body: requestBody
-      });
+      console.log('LM Studio chat request payload:', requestPayload);
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-      const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+      // Call FastAPI endpoint
+      const response = await fetch('http://localhost:8001/llm/lmstudio', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Connection': 'keep-alive'
         },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal
+        body: JSON.stringify(requestPayload),
       });
 
-      clearTimeout(timeoutId);
-
-      console.log('Received response from LM Studio:', {
-        status: response.status,
-        statusText: response.statusText,
-        ok: response.ok
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('LM Studio error response:', errorText);
-        throw new Error(`Chat completion failed: ${response.statusText}. Details: ${errorText}`);
+      if (response.status < 200 || response.status >= 300) {
+        const errorDetails = await response.text();
+        throw new Error(`Chat API call failed. HTTP ${response.status}: ${errorDetails}`);
       }
 
       const result = await response.json();
-      console.log('Parsed response from LM Studio:', result);
+      console.log('LM Studio chat response:', result);
 
-      return {
-        id: result.id,
-        model: result.model,
-        content: result.choices[0].message.content,
-        finish_reason: result.choices[0].finish_reason,
-        usage: result.usage,
-      };
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error('Request timed out after 30 seconds');
+      // Cache response if session ID is set
+      if (this.currentSessionId) {
+        await chromadb.cacheResponse(
+          this.currentSessionId,
+          JSON.stringify(messages),
+          JSON.stringify(result),
+          config?.tools,
+          config?.mcp
+        );
       }
-      console.error('Error in LM Studio chat:', error);
+
+      return result;
+    } catch (error) {
+      console.error('LM Studio chat completion failed:', error);
       throw error;
     }
   }
@@ -224,151 +199,108 @@ class LMStudioProvider implements LLMProvider {
     callbacks: LLMStreamCallbacks,
     config?: LLMConfig
   ): Promise<void> {
-    let retryCount = 0;
-    const maxRetries = 3;
-
-    while (retryCount < maxRetries) {
-      try {
-        // Ensure connection before starting stream
-        await this.ensureConnection();
-
-        // Verify model is still valid
-        const models = await this.listModels();
-        if (!models.includes(this.currentModel!)) {
-          console.warn('Current model no longer available, reinitializing...');
-          await this.initialize();
-        }
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-        const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Connection': 'keep-alive',
-            'Keep-Alive': 'timeout=30, max=100'
-          },
-          body: JSON.stringify({
-            messages,
-            model: config?.model || this.currentModel,
-            temperature: config?.temperature ?? 0.7,
-            max_tokens: config?.max_tokens ?? this.maxTokens,
-            stream: true,
-            keep_alive: true,
-            timeout: 30000
-          }),
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Stream chat completion failed: ${response.statusText}. Details: ${errorText}`);
-        }
-
-        if (!response.body) {
-          throw new Error('Response body is null');
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            
-            if (done) {
-              if (buffer.length > 0) {
-                // Process any remaining data in buffer
-                this.processStreamData(buffer, callbacks);
-              }
-              callbacks.onDone();
-              return; // Successfully completed
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            
-            // Keep the last line in buffer if it's incomplete
-            buffer = lines.pop() || '';
-
-            // Process complete lines
-            for (const line of lines) {
-              if (line.trim()) {
-                this.processStreamData(line, callbacks);
-              }
-            }
-          }
-        } finally {
-          reader.releaseLock();
-        }
-      } catch (error) {
-        console.error(`Stream attempt ${retryCount + 1} failed:`, error);
-        
-        if (error instanceof Error && error.name === 'AbortError') {
-          callbacks.onError(new Error('Request timed out after 30 seconds'));
-          return;
-        }
-
-        if (retryCount === maxRetries - 1) {
-          // Last attempt failed
-          callbacks.onError(error instanceof Error ? error : new Error(String(error)));
-          return;
-        }
-
-        // Wait before retrying
-        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
-        retryCount++;
-      }
-    }
-  }
-
-  private processStreamData(line: string, callbacks: LLMStreamCallbacks): void {
-    if (!line.trim().startsWith('data:')) return;
-    
-    const data = line.replace('data:', '').trim();
-    if (data === '[DONE]') return;
+    const model = config?.model || this.currentModel || this.models[0];
+    const modelConfig = this.getModelConfig(model);
 
     try {
-      const parsed = JSON.parse(data);
-      if (parsed.choices?.[0]?.delta?.content) {
-        callbacks.onChunk(parsed.choices[0].delta.content);
+      // Call FastAPI streaming endpoint
+      const response = await fetch('http://localhost:8001/llm/lmstudio', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: messages.map(msg => ({
+            role: msg.role,
+            content: msg.content,
+            name: msg.name || undefined
+          })),
+          model,
+          temperature: config?.temperature ?? 0.7,
+          max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
+          tools: config?.tools,
+          tool_choice: config?.tool_choice,
+          response_format: modelConfig.supportsJson && config?.response_format ? config.response_format : undefined,
+          stream: true
+        }),
+      });
+
+      if (response.status < 200 || response.status >= 300) {
+        const errorDetails = await response.text();
+        throw new Error(`Stream chat API call failed. HTTP ${response.status}: ${errorDetails}`);
       }
-    } catch (e) {
-      console.warn('Failed to parse SSE message:', line);
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      let content = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        // Decode the chunk and add it to our buffer
+        buffer += new TextDecoder().decode(value);
+
+        // Process any complete lines in the buffer
+        while (buffer.includes('\n')) {
+          const lineEnd = buffer.indexOf('\n');
+          const line = buffer.slice(0, lineEnd).trim();
+          buffer = buffer.slice(lineEnd + 1);
+
+          if (line.startsWith('data: ')) {
+            const data = line.slice(5).trim();
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              const text = parsed.choices[0]?.delta?.content || '';
+              if (text) {
+                content += text;
+                callbacks.onChunk(text);
+              }
+            } catch (e) {
+              console.warn('Failed to parse streaming response:', e);
+            }
+          }
+        }
+      }
+
+      // Cache the complete response if session ID is set
+      if (this.currentSessionId) {
+        const result: LLMResponse = {
+          id: Date.now().toString(),
+          model,
+          content,
+          finish_reason: 'stop'
+        };
+
+        await chromadb.cacheResponse(
+          this.currentSessionId,
+          JSON.stringify(messages),
+          JSON.stringify(result),
+          config?.tools,
+          config?.mcp
+        );
+      }
+
+      callbacks.onDone();
+    } catch (error) {
+      console.error('LM Studio stream chat completion failed:', error);
+      callbacks.onError(error instanceof Error ? error : new Error(String(error)));
     }
   }
 
   public async completion(prompt: string, config?: LLMConfig): Promise<LLMResponse> {
-    const response = await fetch(`${this.baseUrl}/v1/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        prompt,
-        model: config?.model || this.currentModel,
-        temperature: config?.temperature ?? 0.7,
-        max_tokens: config?.max_tokens ?? this.maxTokens,
-        stream: false,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Completion failed: ${response.statusText}`);
-    }
-
-    const result = await response.json();
-    return {
-      id: result.id,
-      model: result.model,
-      content: result.choices[0].text,
-      finish_reason: result.choices[0].finish_reason,
-      usage: result.usage,
-    };
+    // Convert single prompt to chat format
+    const messages: LLMMessage[] = [{
+      role: 'user',
+      content: prompt
+    }];
+    return this.chat(messages, config);
   }
 
   public async streamCompletion(
@@ -376,122 +308,12 @@ class LMStudioProvider implements LLMProvider {
     callbacks: LLMStreamCallbacks,
     config?: LLMConfig
   ): Promise<void> {
-    let retryCount = 0;
-    const maxRetries = 3;
-
-    while (retryCount < maxRetries) {
-      try {
-        // Ensure connection before starting stream
-        await this.ensureConnection();
-
-        // Verify model is still valid
-        const models = await this.listModels();
-        if (!models.includes(this.currentModel!)) {
-          console.warn('Current model no longer available, reinitializing...');
-          await this.initialize();
-        }
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-        const response = await fetch(`${this.baseUrl}/v1/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Connection': 'keep-alive',
-            'Keep-Alive': 'timeout=30, max=100'
-          },
-          body: JSON.stringify({
-            prompt,
-            model: config?.model || this.currentModel,
-            temperature: config?.temperature ?? 0.7,
-            max_tokens: config?.max_tokens ?? this.maxTokens,
-            stream: true,
-            keep_alive: true,
-            timeout: 30000
-          }),
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Stream completion failed: ${response.statusText}. Details: ${errorText}`);
-        }
-
-        if (!response.body) {
-          throw new Error('Response body is null');
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            
-            if (done) {
-              if (buffer.length > 0) {
-                // Process any remaining data in buffer
-                this.processCompletionData(buffer, callbacks);
-              }
-              callbacks.onDone();
-              return; // Successfully completed
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            
-            // Keep the last line in buffer if it's incomplete
-            buffer = lines.pop() || '';
-
-            // Process complete lines
-            for (const line of lines) {
-              if (line.trim()) {
-                this.processCompletionData(line, callbacks);
-              }
-            }
-          }
-        } finally {
-          reader.releaseLock();
-        }
-      } catch (error) {
-        console.error(`Stream attempt ${retryCount + 1} failed:`, error);
-        
-        if (error instanceof Error && error.name === 'AbortError') {
-          callbacks.onError(new Error('Request timed out after 30 seconds'));
-          return;
-        }
-
-        if (retryCount === maxRetries - 1) {
-          // Last attempt failed
-          callbacks.onError(error instanceof Error ? error : new Error(String(error)));
-          return;
-        }
-
-        // Wait before retrying
-        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
-        retryCount++;
-      }
-    }
-  }
-
-  private processCompletionData(line: string, callbacks: LLMStreamCallbacks): void {
-    if (!line.trim().startsWith('data:')) return;
-    
-    const data = line.replace('data:', '').trim();
-    if (data === '[DONE]') return;
-
-    try {
-      const parsed = JSON.parse(data);
-      if (parsed.choices?.[0]?.text) {
-        callbacks.onChunk(parsed.choices[0].text);
-      }
-    } catch (e) {
-      console.warn('Failed to parse SSE message:', line);
-    }
+    // Convert single prompt to chat format
+    const messages: LLMMessage[] = [{
+      role: 'user',
+      content: prompt
+    }];
+    return this.streamChat(messages, callbacks, config);
   }
 }
 

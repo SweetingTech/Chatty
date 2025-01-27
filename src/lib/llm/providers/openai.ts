@@ -130,15 +130,10 @@ class OpenAIProvider implements LLMProvider {
   public models = Object.keys(this.modelConfigs);
   public maxTokens = Math.max(...Object.values(this.modelConfigs).map(c => c.contextWindow));
 
-  private client: OpenAI;
   private currentModel: string;
   private currentSessionId: string | null = null;
 
   constructor(config: OpenAIConfig) {
-    this.client = new OpenAI({
-      apiKey: config.apiKey,
-      organization: config.organization
-    });
     this.currentModel = config.model || 'gpt-3.5-turbo-0125';
   }
 
@@ -168,8 +163,34 @@ class OpenAIProvider implements LLMProvider {
   }
 
   public async initialize(): Promise<void> {
-    // No initialization needed for OpenAI
-    return;
+    try {
+      // Fetch available models from FastAPI
+      const response = await fetch('http://localhost:8001/openai/models');
+      const data = await response.json();
+      
+      // Update our models list with any new models from the API
+      const apiModels = data.models.map((model: any) => model.id);
+      for (const modelId of apiModels) {
+        if (!this.modelConfigs[modelId]) {
+          // Add new model with default capabilities based on model name
+          const isGPT4 = modelId.includes('gpt-4');
+          this.modelConfigs[modelId] = {
+            contextWindow: isGPT4 ? 128000 : 16385,
+            maxOutputTokens: 4096,
+            supportsFunctionCalling: true,
+            supportsVision: false,
+            supportsJson: true,
+            supportsReasoning: false
+          };
+        }
+      }
+      
+      // Update models list
+      this.models = Object.keys(this.modelConfigs);
+    } catch (error) {
+      console.error('Failed to fetch OpenAI models:', error);
+      throw error;
+    }
   }
 
   public async listModels(): Promise<string[]> {
@@ -205,39 +226,43 @@ class OpenAIProvider implements LLMProvider {
     }
 
     try {
-      const openaiMessages = this.convertToOpenAIMessages(messages);
-
-      // Add system message for O1 models if not present
+      // Add system message for reasoning models if not present
       if (modelConfig.supportsReasoning && !messages.some(m => m.role === 'system')) {
-        openaiMessages.unshift({
-          role: 'system',
-          content: 'You are a reasoning model that excels at complex, multi-step tasks. Think carefully and break down problems into steps before responding.'
-        });
+        messages = [
+          {
+            role: 'system',
+            content: 'You are a reasoning model that excels at complex, multi-step tasks. Think carefully and break down problems into steps before responding.'
+          },
+          ...messages
+        ];
       }
 
-      const response = await this.client.chat.completions.create({
-        model,
-        messages: openaiMessages,
-        temperature: config?.temperature ?? 0.7,
-        max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
-        tools: config?.tools as any,
-        tool_choice: config?.tool_choice as any,
-        response_format: modelConfig.supportsJson && config?.response_format ? {
-          type: config.response_format.type as 'text' | 'json_object'
-        } : undefined
+      // Convert messages to OpenAI format
+      const openaiMessages = this.convertToOpenAIMessages(messages);
+
+      // Call FastAPI endpoint
+      const response = await fetch('http://localhost:8001/llm/openai', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: openaiMessages,
+          model,
+          temperature: config?.temperature ?? 0.7,
+          max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
+          tools: config?.tools,
+          tool_choice: config?.tool_choice,
+          response_format: modelConfig.supportsJson && config?.response_format ? config.response_format : undefined
+        }),
       });
 
-      const result: LLMResponse = {
-        id: response.id,
-        model: response.model,
-        content: response.choices[0].message.content || '',
-        finish_reason: response.choices[0].finish_reason || undefined,
-        usage: response.usage ? {
-          prompt_tokens: response.usage.prompt_tokens,
-          completion_tokens: response.usage.completion_tokens,
-          total_tokens: response.usage.total_tokens
-        } : undefined
-      };
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error);
+      }
+
+      const result = await response.json();
 
       // Cache response if session ID is set
       if (this.currentSessionId) {
@@ -266,36 +291,79 @@ class OpenAIProvider implements LLMProvider {
     const modelConfig = this.getModelConfig(model);
 
     try {
-      const openaiMessages = this.convertToOpenAIMessages(messages);
-
-      // Add system message for O1 models if not present
+      // Add system message for reasoning models if not present
       if (modelConfig.supportsReasoning && !messages.some(m => m.role === 'system')) {
-        openaiMessages.unshift({
-          role: 'system',
-          content: 'You are a reasoning model that excels at complex, multi-step tasks. Think carefully and break down problems into steps before responding.'
-        });
+        messages = [
+          {
+            role: 'system',
+            content: 'You are a reasoning model that excels at complex, multi-step tasks. Think carefully and break down problems into steps before responding.'
+          },
+          ...messages
+        ];
       }
 
-      const stream = await this.client.chat.completions.create({
-        model,
-        messages: openaiMessages,
-        temperature: config?.temperature ?? 0.7,
-        max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
-        tools: config?.tools as any,
-        tool_choice: config?.tool_choice as any,
-        response_format: modelConfig.supportsJson && config?.response_format ? {
-          type: config.response_format.type as 'text' | 'json_object'
-        } : undefined,
-        stream: true
+      // Convert messages to OpenAI format
+      const openaiMessages = this.convertToOpenAIMessages(messages);
+
+      // Call FastAPI streaming endpoint
+      const response = await fetch('http://localhost:8001/llm/openai', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: openaiMessages,
+          model,
+          temperature: config?.temperature ?? 0.7,
+          max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
+          tools: config?.tools,
+          tool_choice: config?.tool_choice,
+          response_format: modelConfig.supportsJson && config?.response_format ? config.response_format : undefined,
+          stream: true
+        }),
       });
 
-      let content = '';
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error);
+      }
 
-      for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta?.content;
-        if (delta) {
-          content += delta;
-          callbacks.onChunk(delta);
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      let content = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        // Decode the chunk and add it to our buffer
+        buffer += new TextDecoder().decode(value);
+
+        // Process any complete lines in the buffer
+        while (buffer.includes('\n')) {
+          const lineEnd = buffer.indexOf('\n');
+          const line = buffer.slice(0, lineEnd).trim();
+          buffer = buffer.slice(lineEnd + 1);
+
+          if (line.startsWith('data: ')) {
+            const data = line.slice(5).trim();
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              const text = parsed.choices[0]?.delta?.content || '';
+              if (text) {
+                content += text;
+                callbacks.onChunk(text);
+              }
+            } catch (e) {
+              console.warn('Failed to parse streaming response:', e);
+            }
+          }
         }
       }
 

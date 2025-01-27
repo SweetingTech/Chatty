@@ -24,8 +24,15 @@ export interface Settings {
   lmStudioHost?: string;
   lmStudioPort?: string | number;
   weaviateUrl: string;
+  weaviateHost?: string;
+  weaviatePort?: string | number;
+  weaviateApiKey?: string;
+  weaviateSchemaClass?: string;
+  weaviateBatchSize?: number;
+  weaviateVectorizerModule?: string;
   openaiKey: string;
   claudeKey: string;
+  deepseekKey: string;
   theme: 'light' | 'dark';
   braveApiKey?: string;
   defaultLLMProvider?: ProviderType;

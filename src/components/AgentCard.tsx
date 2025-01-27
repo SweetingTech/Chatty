@@ -9,7 +9,7 @@ interface AgentCardProps {
   onStop: (id: string) => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
-  onSave: () => void;
+  onSave: () => Promise<void>;
   hasChanges: boolean;
 }
 

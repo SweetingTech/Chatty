@@ -17,13 +17,17 @@ if not exist node_modules (
 :: Activate virtual environment
 call venv\Scripts\activate
 
-:: Start ChromaDB server in a new window
-echo Starting ChromaDB server...
-start cmd /k "python start_chroma.py"
-
-:: Wait for ChromaDB to initialize
-echo Waiting for ChromaDB to initialize...
-timeout /t 2
+:: Check if ChromaDB server is already running
+echo Checking ChromaDB server...
+netstat -ano | findstr ":8001" > nul
+if %errorlevel% equ 0 (
+    echo ChromaDB server already running
+) else (
+    echo Starting ChromaDB server...
+    start cmd /k "python start_chroma.py"
+    echo Waiting for ChromaDB to initialize...
+    timeout /t 2
+)
 
 :: Start the frontend
 echo Starting frontend...

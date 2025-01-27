@@ -65,15 +65,10 @@ class DeepseekProvider implements LLMProvider {
   public models = Object.keys(this.modelConfigs);
   public maxTokens = Math.max(...Object.values(this.modelConfigs).map(c => c.contextWindow));
 
-  private client: OpenAI;
   private currentModel: string;
   private currentSessionId: string | null = null;
 
   constructor(config: DeepseekConfig) {
-    this.client = new OpenAI({
-      apiKey: config.apiKey,
-      baseURL: config.baseUrl || 'https://api.deepseek.com/v1'
-    });
     this.currentModel = config.model || 'deepseek-chat';
   }
 
@@ -102,8 +97,32 @@ class DeepseekProvider implements LLMProvider {
   }
 
   public async initialize(): Promise<void> {
-    // No initialization needed for Deepseek
-    return;
+    try {
+      // Fetch available models from FastAPI
+      const response = await fetch('http://localhost:8001/deepseek/models');
+      const data = await response.json();
+      
+      // Update our models list with any new models from the API
+      const apiModels = data.models.map((model: any) => model.id);
+      for (const modelId of apiModels) {
+        if (!this.modelConfigs[modelId]) {
+          // Add new model with default capabilities
+          this.modelConfigs[modelId] = {
+            contextWindow: 32768,
+            maxOutputTokens: 8192,
+            supportsFunctionCalling: true,
+            supportsVision: false,
+            supportsJson: true
+          };
+        }
+      }
+      
+      // Update models list
+      this.models = Object.keys(this.modelConfigs);
+    } catch (error) {
+      console.error('Failed to fetch Deepseek models:', error);
+      throw error;
+    }
   }
 
   public async listModels(): Promise<string[]> {
@@ -139,31 +158,32 @@ class DeepseekProvider implements LLMProvider {
     }
 
     try {
+      // Convert messages to OpenAI format
       const openaiMessages = this.convertToOpenAIMessages(messages);
 
-      const response = await this.client.chat.completions.create({
-        model,
-        messages: openaiMessages,
-        temperature: config?.temperature ?? 0.7,
-        max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
-        tools: config?.tools as any,
-        tool_choice: config?.tool_choice as any,
-        response_format: modelConfig.supportsJson && config?.response_format ? {
-          type: config.response_format.type as 'text' | 'json_object'
-        } : undefined
+      // Call FastAPI endpoint
+      const response = await fetch('http://localhost:8001/llm/deepseek', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: openaiMessages,
+          model,
+          temperature: config?.temperature ?? 0.7,
+          max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
+          tools: config?.tools,
+          tool_choice: config?.tool_choice,
+          response_format: modelConfig.supportsJson && config?.response_format ? config.response_format : undefined
+        }),
       });
 
-      const result: LLMResponse = {
-        id: response.id,
-        model: response.model,
-        content: response.choices[0].message.content || '',
-        finish_reason: response.choices[0].finish_reason || undefined,
-        usage: response.usage ? {
-          prompt_tokens: response.usage.prompt_tokens,
-          completion_tokens: response.usage.completion_tokens,
-          total_tokens: response.usage.total_tokens
-        } : undefined
-      };
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error);
+      }
+
+      const result = await response.json();
 
       // Cache response if session ID is set
       if (this.currentSessionId) {
@@ -192,28 +212,68 @@ class DeepseekProvider implements LLMProvider {
     const modelConfig = this.getModelConfig(model);
 
     try {
+      // Convert messages to OpenAI format
       const openaiMessages = this.convertToOpenAIMessages(messages);
 
-      const stream = await this.client.chat.completions.create({
-        model,
-        messages: openaiMessages,
-        temperature: config?.temperature ?? 0.7,
-        max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
-        tools: config?.tools as any,
-        tool_choice: config?.tool_choice as any,
-        response_format: modelConfig.supportsJson && config?.response_format ? {
-          type: config.response_format.type as 'text' | 'json_object'
-        } : undefined,
-        stream: true
+      // Call FastAPI streaming endpoint
+      const response = await fetch('http://localhost:8001/llm/deepseek', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: openaiMessages,
+          model,
+          temperature: config?.temperature ?? 0.7,
+          max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
+          tools: config?.tools,
+          tool_choice: config?.tool_choice,
+          response_format: modelConfig.supportsJson && config?.response_format ? config.response_format : undefined,
+          stream: true
+        }),
       });
 
-      let content = '';
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error);
+      }
 
-      for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta?.content;
-        if (delta) {
-          content += delta;
-          callbacks.onChunk(delta);
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      let content = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        // Decode the chunk and add it to our buffer
+        buffer += new TextDecoder().decode(value);
+
+        // Process any complete lines in the buffer
+        while (buffer.includes('\n')) {
+          const lineEnd = buffer.indexOf('\n');
+          const line = buffer.slice(0, lineEnd).trim();
+          buffer = buffer.slice(lineEnd + 1);
+
+          if (line.startsWith('data: ')) {
+            const data = line.slice(5).trim();
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              const text = parsed.choices[0]?.delta?.content || '';
+              if (text) {
+                content += text;
+                callbacks.onChunk(text);
+              }
+            } catch (e) {
+              console.warn('Failed to parse streaming response:', e);
+            }
+          }
         }
       }
 

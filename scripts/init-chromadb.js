@@ -48,6 +48,18 @@ async function initializeChromaDB() {
       {
         name: 'tool_modifications',
         description: 'Stores modifications to default tools'
+      },
+      {
+        name: 'additional_agents',
+        description: 'Stores additional custom agents'
+      },
+      {
+        name: 'additional_tools',
+        description: 'Stores additional custom tools'
+      },
+      {
+        name: 'user_settings',
+        description: 'Stores user settings and API keys'
       }
     ];
 
@@ -70,7 +82,10 @@ async function initializeChromaDB() {
           body: JSON.stringify({
             name: collection.name,
             metadata: {
-              description: collection.description
+              description: collection.description,
+              "hnsw:space": "cosine",
+              "hnsw:construction_ef": 100,
+              "hnsw:search_ef": 50
             }
           })
         });
@@ -87,53 +102,37 @@ async function initializeChromaDB() {
 
     console.log('Successfully created all collections in ChromaDB');
 
-    // Add test documents to verify everything works
-    const testData = [
+    // Add test documents and default settings
+    const initialData = [
       {
-        collection: 'agent_modifications',
+        collection: 'user_settings',
         data: {
-          ids: ['test-agent-mod'],
-          metadatas: [{ timestamp: Date.now(), type: 'agent_modification' }],
+          ids: ['api_keys'],
+          metadatas: [{ timestamp: Date.now(), type: 'settings' }],
           documents: [JSON.stringify({
-            targetId: 'chat-agent',
-            changes: {
-              config: {
-                customSetting: true
-              }
-            }
-          })]
-        }
-      },
-      {
-        collection: 'tool_modifications',
-        data: {
-          ids: ['test-tool-mod'],
-          metadatas: [{ timestamp: Date.now(), type: 'tool_modification' }],
-          documents: [JSON.stringify({
-            targetId: 'execute-command',
-            changes: {
-              config: {
-                customSetting: true
-              }
-            }
+            openaiKey: process.env.VITE_OPENAI_API_KEY || '',
+            claudeKey: process.env.VITE_CLAUDE_API_KEY || '',
+            deepseekKey: process.env.VITE_DEEPSEEK_API_KEY || '',
+            lmStudioHost: process.env.VITE_LM_STUDIO_HOST || 'localhost',
+            lmStudioPort: process.env.VITE_LM_STUDIO_PORT || '1234'
           })]
         }
       }
     ];
 
-    for (const test of testData) {
-      const response = await fetch(`${CHROMA_URL}/collections/${test.collection}/add`, {
+    for (const item of initialData) {
+      const response = await fetch(`${CHROMA_URL}/collections/${item.collection}/add`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(test.data)
+        body: JSON.stringify(item.data)
       });
 
       if (!response.ok) {
-        console.warn(`Warning: Failed to add test document to '${test.collection}': ${await response.text()}`);
+        console.warn(`Warning: Failed to add initial data to '${item.collection}': ${await response.text()}`);
       } else {
-        console.log(`Added test document to '${test.collection}'`);
+        console.log(`Added initial data to '${item.collection}'`);
       }
     }
 

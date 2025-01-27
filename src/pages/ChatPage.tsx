@@ -5,6 +5,7 @@ import { ChatMessage } from '../components/ChatMessage';
 import { ChatInput } from '../components/ChatInput';
 import { ChatAgent, type ChatAgentConfig } from '../lib/agents/chat';
 import type { ProviderType } from '../types';
+import { weaviateService } from '../lib/weaviate';
 
 // Internal component with all the logic
 function ChatPageComponent() {
@@ -102,7 +103,7 @@ function ChatPageComponent() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentChat?.messages]);
 
-  const handleSendMessage = async (content: string) => {
+  const handleSendMessage = async (content: string, files?: File[]) => {
     if (!chatAgentRef.current) {
       console.error('Chat agent not initialized');
       return;
@@ -122,13 +123,42 @@ function ChatPageComponent() {
       addChatSession(newSession);
     }
 
-    // Add user message immediately to show it in the UI
+    // Handle file uploads first if any
+    let fileReferences = [];
+    if (files && files.length > 0) {
+      for (const file of files) {
+        const content = await file.text();
+        try {
+          // Store in Weaviate with chat session reference
+          await weaviateService.addDocument({
+            title: file.name,
+            content,
+            metadata: {
+              chatId: sessionId,
+              type: 'chat_upload',
+              timestamp: Date.now(),
+              createdAt: Date.now()
+            }
+          });
+          fileReferences.push({
+            name: file.name,
+            type: file.type,
+            uploadedAt: Date.now()
+          });
+        } catch (error) {
+          console.error('Failed to store file in Weaviate:', error);
+        }
+      }
+    }
+
+    // Add user message with file references
     const userMessage = {
       id: crypto.randomUUID(),
       role: 'user' as const,
       content,
       timestamp: Date.now(),
       conversationId: sessionId,
+      files: fileReferences
     };
     updateChatSession(sessionId, {
       messages: [...(currentChat?.messages || []), userMessage],
@@ -188,6 +218,15 @@ function ChatPageComponent() {
         updatedAt: Date.now(),
       });
       console.error('Failed to process message through agent:', error);
+
+      // Clean up Weaviate documents if message processing failed
+      if (fileReferences.length > 0) {
+        try {
+          await weaviateService.deleteDocumentsByChatId(sessionId);
+        } catch (cleanupError) {
+          console.error('Failed to clean up Weaviate documents:', cleanupError);
+        }
+      }
     }
   };
 

@@ -1,11 +1,16 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { format } from 'date-fns';
 import { MessageSquarePlus, Trash2 } from 'lucide-react';
 import { useAppStore } from '../store';
 import type { ChatSession } from '../types';
 
 export function ChatSidebar() {
-  const { chatSessions, currentChatId, setCurrentChatId, addChatSession, deleteChatSession } = useAppStore();
+  const { chatSessions, currentChatId, setCurrentChatId, addChatSession, deleteChatSession, initializeServices } = useAppStore();
+
+  // Initialize services when component mounts
+  useEffect(() => {
+    initializeServices();
+  }, [initializeServices]);
 
   const createNewChat = () => {
     const newSession: ChatSession = {

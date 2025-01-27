@@ -118,6 +118,7 @@ export interface LMStudioConfig extends LLMConfig {
   baseUrl?: string;
   host?: string;
   port?: string | number;
+  onModelUpdate?: (modelId: string) => void;
 }
 
 export interface DeepseekConfig extends LLMConfig {

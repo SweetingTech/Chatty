@@ -2,7 +2,7 @@ import { execSync } from 'child_process';
 import findProcess from 'find-process';
 
 async function killProcesses() {
-  // Kill any processes using port 5173 or 5174 (Vite)
+  // Only kill Vite processes, leave ChromaDB running
   try {
     const viteProcesses = await findProcess('port', 5173);
     const viteProcesses2 = await findProcess('port', 5174);
@@ -14,15 +14,16 @@ async function killProcesses() {
     console.log('No Vite processes found');
   }
 
-  // Kill any processes using port 8001 (ChromaDB)
+  // Check if ChromaDB is running
   try {
     const chromaProcesses = await findProcess('port', 8001);
-    for (const proc of chromaProcesses) {
-      console.log(`Killing ChromaDB process ${proc.pid}`);
-      process.kill(proc.pid);
+    if (chromaProcesses.length === 0) {
+      console.log('ChromaDB not running, will be started by npm script');
+    } else {
+      console.log('ChromaDB already running, reusing existing instance');
     }
   } catch (err) {
-    console.log('No ChromaDB processes found');
+    console.log('Error checking ChromaDB process:', err);
   }
 
   // Give processes time to fully terminate

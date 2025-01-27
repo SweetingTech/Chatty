@@ -151,7 +151,7 @@ export function APIPage() {
 
               <div className="mt-4 pt-4 border-t border-gray-200">
                 <SaveButton 
-                  onSave={() => saveDraftAPI(api.id)}
+                  onSave={async () => await saveDraftAPI(api.id)}
                   hasChanges={hasDraftAPI(api.id)}
                 />
               </div>

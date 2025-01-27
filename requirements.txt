@@ -6,3 +6,5 @@ numpy
 setuptools
 onnxruntime-gpu
 psutil
+openai
+anthropic

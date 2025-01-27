@@ -35,6 +35,13 @@ export function DashboardPage() {
         : 'API key not configured',
     },
     {
+      title: 'Deepseek',
+      status: settings.deepseekKey ? ('online' as ServiceStatusType) : ('offline' as ServiceStatusType),
+      description: settings.deepseekKey
+        ? 'API key configured and ready'
+        : 'API key not configured',
+    },
+    {
       title: 'Weaviate',
       status: serviceStatus.weaviate,
       description: serviceStatus.weaviate === 'online'

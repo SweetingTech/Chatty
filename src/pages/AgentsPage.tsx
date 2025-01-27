@@ -36,8 +36,8 @@ export function AgentsPage() {
     }
   };
 
-  const handleSaveAgent = (id: string) => {
-    saveDraftAgent(id);
+  const handleSaveAgent = async (id: string) => {
+    await saveDraftAgent(id);
   };
 
   const handleEditAgent = (id: string) => {

@@ -108,6 +108,7 @@ export function AgentForm({ agent, availableTools, onSubmit, onCancel }: AgentFo
           <option value="lm-studio">LM Studio</option>
           <option value="openai">OpenAI</option>
           <option value="claude">Claude</option>
+          <option value="deepseek">Deepseek</option>
         </select>
       </div>
 

@@ -3,17 +3,150 @@ from chromadb.config import Settings
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 import json
+import time
+import httpx
 import os
 import traceback
 from dotenv import load_dotenv
 from pydantic import BaseModel
 import onnxruntime as ort
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 import socket
 import psutil
 import sys
+import openai
+from openai import OpenAI
+import anthropic
+from anthropic import Anthropic
+
+# LLM Models
+class ModelCapabilities(BaseModel):
+    contextWindow: int
+    maxOutputTokens: int
+    supportsFunctionCalling: bool
+    supportsVision: bool
+    supportsJson: bool
+    supportsReasoning: bool
+
+class ModelInfo(BaseModel):
+    id: str
+    name: str
+    capabilities: ModelCapabilities
+
+class LLMMessage(BaseModel):
+    role: str
+    content: str
+    name: Optional[str] = None
+
+class LLMRequest(BaseModel):
+    messages: List[LLMMessage]
+    model: Optional[str] = None
+    temperature: Optional[float] = 0.7
+    max_tokens: Optional[int] = None
+    tools: Optional[List[Dict]] = None
+    tool_choice: Optional[Dict] = None
+    response_format: Optional[Dict] = None
+    stream: Optional[bool] = False
+
+class LLMResponse(BaseModel):
+    id: str
+    model: str
+    content: str
+    finish_reason: Optional[str] = None
+    usage: Optional[Dict] = None
+
+# Model configurations
+OPENAI_MODEL_CONFIGS = {
+    # GPT-4 Turbo
+    'gpt-4-turbo': {
+        'name': 'GPT-4 Turbo',
+        'capabilities': {
+            'contextWindow': 128000,
+            'maxOutputTokens': 4096,
+            'supportsFunctionCalling': True,
+            'supportsVision': False,
+            'supportsJson': True,
+            'supportsReasoning': False
+        }
+    },
+    'gpt-4-0125-preview': {
+        'name': 'GPT-4 Turbo Preview',
+        'capabilities': {
+            'contextWindow': 128000,
+            'maxOutputTokens': 4096,
+            'supportsFunctionCalling': True,
+            'supportsVision': False,
+            'supportsJson': True,
+            'supportsReasoning': False
+        }
+    },
+    # GPT-4
+    'gpt-4': {
+        'name': 'GPT-4',
+        'capabilities': {
+            'contextWindow': 8192,
+            'maxOutputTokens': 8192,
+            'supportsFunctionCalling': True,
+            'supportsVision': False,
+            'supportsJson': False,
+            'supportsReasoning': False
+        }
+    },
+    # GPT-3.5 Turbo
+    'gpt-3.5-turbo-0125': {
+        'name': 'GPT-3.5 Turbo',
+        'capabilities': {
+            'contextWindow': 16385,
+            'maxOutputTokens': 4096,
+            'supportsFunctionCalling': True,
+            'supportsVision': False,
+            'supportsJson': True,
+            'supportsReasoning': False
+        }
+    }
+}
+
+CLAUDE_MODEL_CONFIGS = {
+    'claude-3-opus-20240229': {
+        'name': 'Claude 3 Opus',
+        'capabilities': {
+            'contextWindow': 200000,
+            'maxOutputTokens': 4096,
+            'supportsFunctionCalling': True,
+            'supportsVision': True,
+            'supportsJson': True,
+            'supportsReasoning': True
+        }
+    },
+    'claude-3-sonnet-20240229': {
+        'name': 'Claude 3 Sonnet',
+        'capabilities': {
+            'contextWindow': 200000,
+            'maxOutputTokens': 4096,
+            'supportsFunctionCalling': True,
+            'supportsVision': True,
+            'supportsJson': True,
+            'supportsReasoning': True
+        }
+    },
+    'claude-3-haiku-20240307': {
+        'name': 'Claude 3 Haiku',
+        'capabilities': {
+            'contextWindow': 200000,
+            'maxOutputTokens': 4096,
+            'supportsFunctionCalling': True,
+            'supportsVision': True,
+            'supportsJson': True,
+            'supportsReasoning': True
+        }
+    }
+}
+
+# Initialize LLM clients (disabled for now since we only need ChromaDB)
+openai_client = None
+anthropic_client = None
 
 # Load environment variables
 load_dotenv()
@@ -45,29 +178,61 @@ def is_port_in_use(port: int) -> bool:
 # Create FastAPI app
 app = FastAPI()
 
-# Add CORS middleware with more permissive settings for development
+# Add CORS middleware with specific allowed origins
+# Get allowed origins from environment or use defaults
+ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '*')
+
+# Add CORS middleware with enhanced browser support
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins in development
-    allow_credentials=False,  # Must be False when allow_origins=["*"]
+    allow_origins=[ALLOWED_ORIGINS],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"]
+    expose_headers=["*"],
+    max_age=86400  # Cache preflight requests for 24 hours
 )
+
+# Enhanced collection settings for better persistence
+COLLECTION_SETTINGS = {
+    "description": "Stores chat session history",
+    "hnsw:space": "cosine",
+    "hnsw:construction_ef": 100,
+    "hnsw:search_ef": 50
+}
 
 # Set ONNX Runtime providers to use GPU
 providers = ort.get_available_providers()
 print("Available ONNX Runtime providers:", providers)
 
 # Initialize ChromaDB client in local mode
-client = chromadb.Client(
-    Settings(
-        persist_directory="./chroma_data",  # Persistent storage
-        allow_reset=True,
+client = chromadb.PersistentClient(
+    path="./chroma_data",  # Persistent storage
+    settings=Settings(
         anonymized_telemetry=False,
+        allow_reset=True,
         is_persistent=True
     )
 )
+
+# Ensure chat_sessions collection exists with proper settings
+try:
+    # Try to get existing collection
+    chat_collection = client.get_collection('chat_sessions')
+    
+    # Update collection settings if needed
+    if chat_collection.metadata != COLLECTION_SETTINGS:
+        client.delete_collection('chat_sessions')
+        chat_collection = client.create_collection(
+            name='chat_sessions',
+            metadata=COLLECTION_SETTINGS
+        )
+except ValueError:
+    # Create new collection with enhanced settings
+    chat_collection = client.create_collection(
+        name='chat_sessions',
+        metadata=COLLECTION_SETTINGS
+    )
 
 # Initialize default collections
 default_collections = {
@@ -211,6 +376,14 @@ async def add_documents(collection_name: str, request: Request):
         print(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/collections/{collection_name}")
+async def delete_collection(collection_name: str):
+    try:
+        client.delete_collection(name=collection_name)
+        return {"status": "success", "message": f"Collection {collection_name} deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/collections/{collection_name}/delete")
 async def delete_documents(collection_name: str, request: Request):
     try:
@@ -224,37 +397,86 @@ async def delete_documents(collection_name: str, request: Request):
 @app.post("/sessions/{session_id}")
 async def save_session(session_id: str, request: Request):
     try:
-        # Parse the raw request body
-        body = await request.json()
+        # Get client and browser identifiers
+        client_id = request.headers.get("X-Client-ID", "unknown")
+        browser_id = request.headers.get("X-Browser-ID", "unknown")
         
-        # Handle both array and single object cases
+        # Parse request body
+        body = await request.json()
         messages = body if isinstance(body, list) else [body]
         
-        # Validate message format
+        # Validate messages
         for msg in messages:
             if not all(key in msg for key in ["id", "role", "content", "timestamp"]):
-                raise HTTPException(status_code=422, detail="Invalid message format. Required fields: id, role, content, timestamp")
-
+                raise HTTPException(status_code=422, detail="Invalid message format")
+            
+            # Ensure timestamps are integers
+            msg["timestamp"] = int(msg["timestamp"])
+        
         collection = client.get_collection('chat_sessions')
-
-        # First try to delete any existing session
+        current_time = int(time.time() * 1000)
+        
         try:
+            # Get existing session with full metadata
+            existing = collection.get(
+                ids=[session_id],
+                include=['documents', 'metadatas']
+            )
+            
+            metadata = {
+                "timestamp": current_time,
+                "last_updated": current_time,
+                "type": "chat_session",
+                "client_id": client_id,
+                "browser_id": browser_id,
+                "update_count": 1
+            }
+            
+            if existing['metadatas']:
+                try:
+                    existing_messages = json.loads(existing['documents'][0])
+                    existing_metadata = existing['metadatas'][0]
+                    
+                    # Create message ID lookup
+                    message_ids = {msg['id'] for msg in messages}
+                    
+                    # Merge messages, keeping newer versions of duplicates
+                    for msg in existing_messages:
+                        if msg['id'] not in message_ids:
+                            messages.append(msg)
+                    
+                    # Update metadata
+                    metadata.update({
+                        "update_count": existing_metadata.get("update_count", 0) + 1,
+                        "browsers": list(set([browser_id] + existing_metadata.get("browsers", []))),
+                        "clients": list(set([client_id] + existing_metadata.get("clients", [])))
+                    })
+                except Exception as e:
+                    print(f"Error merging messages: {str(e)}")
+            
+            # Sort messages by timestamp
+            messages.sort(key=lambda x: x['timestamp'])
+            
+            # Update metadata with latest message info
+            if messages:
+                metadata.update({
+                    "latest_timestamp": messages[-1]['timestamp'],
+                    "message_count": len(messages)
+                })
+            
+            # Update the session atomically
             collection.delete(ids=[session_id])
-        except Exception as e:
-            print(f"Error deleting existing session: {str(e)}")
-            # Continue since this is not critical
-
-        try:
-            # Add new session data
             collection.add(
                 ids=[session_id],
-                metadatas=[{
-                    "timestamp": messages[-1].get("timestamp", 0) if messages else 0,
-                    "type": "chat_session"
-                }],
+                metadatas=[metadata],
                 documents=[json.dumps(messages)]
             )
-            return {"status": "ok", "message": "Session saved"}
+            
+            return {
+                "status": "ok",
+                "message": "Session saved",
+                "metadata": metadata
+            }
         except Exception as e:
             print(f"Error adding session: {str(e)}")
             print(f"Request body: {messages}")
@@ -266,21 +488,55 @@ async def save_session(session_id: str, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/sessions/{session_id}")
-async def get_session(session_id: str):
+async def get_session(session_id: str, request: Request):
     try:
+        # Get client identifiers
+        client_id = request.headers.get("X-Client-ID", "unknown")
+        browser_id = request.headers.get("X-Browser-ID", "unknown")
+        
         collection = client.get_collection('chat_sessions')
-        result = collection.get(ids=[session_id], limit=1)
+        result = collection.get(
+            ids=[session_id],
+            include=['documents', 'metadatas']
+        )
+        
         if not result["documents"]:
             raise HTTPException(status_code=404, detail="Session not found")
-        return {
-            "messages": json.loads(result["documents"][0]),
-            "metadata": result["metadatas"][0]
-        }
+        
+        try:
+            messages = json.loads(result["documents"][0])
+            metadata = result["metadatas"][0]
+            
+            # Sort messages by timestamp
+            messages.sort(key=lambda x: x['timestamp'])
+            
+            # Update metadata with access info
+            metadata.update({
+                "last_accessed": int(time.time() * 1000),
+                "last_access_client": client_id,
+                "last_access_browser": browser_id,
+                "message_count": len(messages)
+            })
+            
+            # Update metadata in background
+            collection.update(
+                ids=[session_id],
+                metadatas=[metadata]
+            )
+            
+            return {
+                "messages": messages,
+                "metadata": metadata
+            }
+        except json.JSONDecodeError as e:
+            print(f"Error decoding session messages: {str(e)}")
+            raise HTTPException(status_code=500, detail="Invalid session data format")
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
     try:
         collection = client.get_collection('chat_sessions')
@@ -290,16 +546,525 @@ async def delete_session(session_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/sessions")
-async def list_sessions():
+async def list_sessions(request: Request):
     try:
+        # Get client identifiers
+        client_id = request.headers.get("X-Client-ID", "unknown")
+        browser_id = request.headers.get("X-Browser-ID", "unknown")
+        
         collection = client.get_collection('chat_sessions')
-        result = collection.get()
-        return [{
-            "id": id,
-            "messages": json.loads(doc),
-            "metadata": meta
-        } for id, doc, meta in zip(result["ids"], result["documents"], result["metadatas"])]
+        result = collection.get(
+            include=['documents', 'metadatas'],
+            where={"type": "chat_session"}  # Only get chat sessions
+        )
+        
+        sessions = []
+        current_time = int(time.time() * 1000)
+        
+        for id, doc, meta in zip(result["ids"], result["documents"], result["metadatas"]):
+            try:
+                messages = json.loads(doc)
+                
+                # Sort messages by timestamp
+                messages.sort(key=lambda x: x['timestamp'])
+                
+                # Update metadata
+                meta.update({
+                    "last_listed": current_time,
+                    "last_list_client": client_id,
+                    "last_list_browser": browser_id,
+                    "message_count": len(messages)
+                })
+                
+                sessions.append({
+                    "id": id,
+                    "messages": messages,
+                    "metadata": meta
+                })
+            except json.JSONDecodeError as e:
+                print(f"Error decoding session {id}: {str(e)}")
+                continue
+        
+        # Sort by last_updated, then by message count
+        sessions.sort(
+            key=lambda x: (
+                x['metadata'].get('last_updated', 0),
+                x['metadata'].get('message_count', 0)
+            ),
+            reverse=True
+        )
+        
+        # Update metadata in background
+        if sessions:
+            collection.update(
+                ids=[s["id"] for s in sessions],
+                metadatas=[s["metadata"] for s in sessions]
+            )
+        
+        return sessions
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# LLM Model Listing Endpoints
+@app.get("/anthropic/models")
+async def list_anthropic_models(limit: int = 20, before_id: str = None, after_id: str = None):
+    """List available Anthropic models with capabilities."""
+    try:
+        result = anthropic_client.models.list(
+            limit=limit,
+            before_id=before_id,
+            after_id=after_id
+        )
+        
+        # Enhance model info with capabilities
+        models = []
+        for model in result.data:
+            model_id = model.id
+            if model_id in CLAUDE_MODEL_CONFIGS:
+                config = CLAUDE_MODEL_CONFIGS[model_id]
+                models.append({
+                    "id": model_id,
+                    "name": config["name"],
+                    "capabilities": config["capabilities"]
+                })
+            else:
+                # Default capabilities for unknown models
+                models.append({
+                    "id": model_id,
+                    "name": model.name if hasattr(model, "name") else model_id,
+                    "capabilities": {
+                        "contextWindow": 200000,
+                        "maxOutputTokens": 4096,
+                        "supportsFunctionCalling": True,
+                        "supportsVision": True,
+                        "supportsJson": True,
+                        "supportsReasoning": True
+                    }
+                })
+        
+        return {"data": models}
+    except Exception as e:
+        print(f"Anthropic models error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/anthropic/models/{model_id}")
+async def get_anthropic_model(model_id: str):
+    """Get details about a specific Anthropic model with capabilities."""
+    try:
+        result = anthropic_client.models.get(model_id)
+        
+        if model_id in CLAUDE_MODEL_CONFIGS:
+            config = CLAUDE_MODEL_CONFIGS[model_id]
+            return {
+                "id": model_id,
+                "name": config["name"],
+                "capabilities": config["capabilities"]
+            }
+        else:
+            # Default capabilities for unknown models
+            return {
+                "id": model_id,
+                "name": result.name if hasattr(result, "name") else model_id,
+                "capabilities": {
+                    "contextWindow": 200000,
+                    "maxOutputTokens": 4096,
+                    "supportsFunctionCalling": True,
+                    "supportsVision": True,
+                    "supportsJson": True,
+                    "supportsReasoning": True
+                }
+            }
+    except Exception as e:
+        print(f"Anthropic model error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/openai/models")
+async def list_openai_models():
+    """List available OpenAI models with capabilities."""
+    try:
+        response = await openai_client.models.list()
+        models = []
+        
+        for model in response.data:
+            model_id = model.id
+            if "embedding" not in model_id.lower():
+                if model_id in OPENAI_MODEL_CONFIGS:
+                    config = OPENAI_MODEL_CONFIGS[model_id]
+                    models.append({
+                        "id": model_id,
+                        "name": config["name"],
+                        "capabilities": config["capabilities"]
+                    })
+                else:
+                    # Default capabilities for unknown models
+                    models.append({
+                        "id": model_id,
+                        "name": model.name if hasattr(model, "name") else model_id,
+                        "capabilities": {
+                            "contextWindow": 16385,
+                            "maxOutputTokens": 4096,
+                            "supportsFunctionCalling": True,
+                            "supportsVision": False,
+                            "supportsJson": True,
+                            "supportsReasoning": False
+                        }
+                    })
+        
+        return {"models": models}
+    except Exception as e:
+        print(f"OpenAI models error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/openai/models/{model_id}")
+async def get_openai_model(model_id: str):
+    """Get details about a specific OpenAI model with capabilities."""
+    try:
+        model_info = await openai_client.models.retrieve(model_id)
+        
+        if model_id in OPENAI_MODEL_CONFIGS:
+            config = OPENAI_MODEL_CONFIGS[model_id]
+            return {
+                "id": model_id,
+                "name": config["name"],
+                "capabilities": config["capabilities"]
+            }
+        else:
+            # Default capabilities for unknown models
+            return {
+                "id": model_id,
+                "name": model_info.name if hasattr(model_info, "name") else model_id,
+                "capabilities": {
+                    "contextWindow": 16385,
+                    "maxOutputTokens": 4096,
+                    "supportsFunctionCalling": True,
+                    "supportsVision": False,
+                    "supportsJson": True,
+                    "supportsReasoning": False
+                }
+            }
+    except Exception as e:
+        print(f"OpenAI model error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# LLM Chat Endpoints
+@app.post("/llm/openai")
+async def call_openai(request: LLMRequest):
+    """Call OpenAI's chat completion API."""
+    try:
+        # Convert messages to OpenAI format
+        messages = []
+        for msg in request.messages:
+            message = {
+                "role": msg.role,
+                "content": msg.content
+            }
+            if msg.role == 'function':
+                message["name"] = msg.name or 'function'
+            messages.append(message)
+
+        # Create completion request
+        completion_request = {
+            "model": request.model or "gpt-3.5-turbo",
+            "messages": messages,
+            "temperature": request.temperature,
+            "stream": request.stream
+        }
+
+        # Add optional parameters
+        if request.max_tokens:
+            completion_request["max_tokens"] = request.max_tokens
+        if request.tools:
+            completion_request["tools"] = request.tools
+        if request.tool_choice:
+            completion_request["tool_choice"] = request.tool_choice
+        if request.response_format:
+            completion_request["response_format"] = request.response_format
+
+        # Make API call
+        if request.stream:
+            # Return streaming response
+            return StreamingResponse(
+                stream_openai_response(completion_request),
+                media_type='text/event-stream'
+            )
+        else:
+            # Return regular response
+            response = await openai_client.chat.completions.create(**completion_request)
+            return LLMResponse(
+                id=response.id,
+                model=response.model,
+                content=response.choices[0].message.content,
+                finish_reason=response.choices[0].finish_reason,
+                usage=response.usage.model_dump() if response.usage else None
+            )
+    except Exception as e:
+        print(f"OpenAI error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def stream_openai_response(completion_request: dict):
+    """Stream OpenAI chat completion responses."""
+    try:
+        stream = await openai_client.chat.completions.create(**completion_request)
+        async for chunk in stream:
+            if chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+    except Exception as e:
+        print(f"OpenAI streaming error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/llm/claude")
+async def call_claude(request: LLMRequest):
+    """Call Anthropic's Claude API."""
+    try:
+        # Convert messages to Claude format
+        messages = []
+        for msg in request.messages:
+            # Claude expects system messages as user messages
+            role = 'user' if msg.role == 'system' else msg.role
+            messages.append({
+                "role": role,
+                "content": msg.content
+            })
+
+        # Create completion request
+        completion_request = {
+            "model": request.model or "claude-3-opus-20240229",
+            "messages": messages,
+            "max_tokens": request.max_tokens or 4096,
+            "temperature": request.temperature,
+            "stream": request.stream
+        }
+
+        # Make API call
+        if request.stream:
+            # Return streaming response
+            return StreamingResponse(
+                stream_claude_response(completion_request),
+                media_type='text/event-stream'
+            )
+        else:
+            # Return regular response
+            response = await anthropic_client.messages.create(**completion_request)
+            return LLMResponse(
+                id=response.id,
+                model=response.model,
+                content=response.content[0].text,
+                finish_reason=response.stop_reason,
+                usage={
+                    "prompt_tokens": response.usage.input_tokens,
+                    "completion_tokens": response.usage.output_tokens,
+                    "total_tokens": response.usage.input_tokens + response.usage.output_tokens
+                }
+            )
+    except Exception as e:
+        print(f"Claude error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def stream_claude_response(completion_request: dict):
+    """Stream Claude chat completion responses."""
+    try:
+        stream = await anthropic_client.messages.create(**completion_request)
+        async for chunk in stream:
+            if chunk.type == 'content_block_delta' and 'text' in chunk.delta:
+                yield chunk.delta.text
+    except Exception as e:
+        print(f"Claude streaming error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/llm/deepseek")
+async def call_deepseek(request: LLMRequest):
+    """Call Deepseek's API (using OpenAI format)."""
+    try:
+        # Convert messages to OpenAI format
+        messages = []
+        for msg in request.messages:
+            message = {
+                "role": msg.role,
+                "content": msg.content
+            }
+            if msg.role == 'function':
+                message["name"] = msg.name or 'function'
+            messages.append(message)
+
+        # Create completion request
+        completion_request = {
+            "model": request.model or "deepseek-chat",
+            "messages": messages,
+            "temperature": request.temperature,
+            "stream": request.stream
+        }
+
+        # Add optional parameters
+        if request.max_tokens:
+            completion_request["max_tokens"] = request.max_tokens
+        if request.tools:
+            completion_request["tools"] = request.tools
+        if request.tool_choice:
+            completion_request["tool_choice"] = request.tool_choice
+        if request.response_format:
+            completion_request["response_format"] = request.response_format
+
+        # Make API call
+        if request.stream:
+            # Return streaming response
+            return StreamingResponse(
+                stream_openai_response(completion_request),  # Reuse OpenAI streaming
+                media_type='text/event-stream'
+            )
+        else:
+            # Return regular response
+            response = await openai_client.chat.completions.create(**completion_request)
+            return LLMResponse(
+                id=response.id,
+                model=response.model,
+                content=response.choices[0].message.content,
+                finish_reason=response.choices[0].finish_reason,
+                usage=response.usage.model_dump() if response.usage else None
+            )
+    except Exception as e:
+        print(f"Deepseek error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/lmstudio/models")
+async def list_lmstudio_models():
+    """List available LM Studio models."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get('http://localhost:1234/v1/models')
+            if not response.is_success:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            data = response.json()
+        
+        # Convert to our format
+        models = []
+        for model in data['data']:
+            model_id = model['id']
+            models.append({
+                "id": model_id,
+                "name": model.get('name', model_id),
+                "capabilities": {
+                    "contextWindow": 32768,
+                    "maxOutputTokens": 8192,
+                    "supportsFunctionCalling": True,
+                    "supportsVision": False,
+                    "supportsJson": True,
+                    "supportsReasoning": False
+                }
+            })
+        
+        return {"models": models}
+    except Exception as e:
+        print(f"LM Studio models error: {str(e)}")
+        # Return default model if API call fails
+        return {
+            "models": [{
+                "id": "local-model",
+                "name": "Local Model",
+                "capabilities": {
+                    "contextWindow": 32768,
+                    "maxOutputTokens": 8192,
+                    "supportsFunctionCalling": True,
+                    "supportsVision": False,
+                    "supportsJson": True,
+                    "supportsReasoning": False
+                }
+            }]
+        }
+
+@app.post("/llm/lmstudio")
+async def call_lmstudio(request: LLMRequest):
+    """Call LM Studio's local API."""
+    try:
+        # Create completion request
+        # Convert messages to LM Studio format
+        messages = []
+        for msg in request.messages:
+            message = {
+                "role": msg.role,
+                "content": msg.content
+            }
+            if msg.name:
+                message["name"] = msg.name
+            messages.append(message)
+
+        # Create completion request
+        completion_request = {
+            "model": request.model or "local-model",
+            "messages": messages,
+            "temperature": request.temperature,
+            "stream": request.stream
+        }
+
+        # Add optional parameters
+        if request.max_tokens:
+            completion_request["max_tokens"] = request.max_tokens
+        if request.tools:
+            completion_request["tools"] = request.tools
+        if request.tool_choice:
+            completion_request["tool_choice"] = request.tool_choice
+        if request.response_format:
+            completion_request["response_format"] = request.response_format
+
+        # Make API call
+        if request.stream:
+            # Return streaming response
+            return StreamingResponse(
+                stream_lmstudio_response(completion_request),
+                media_type='text/event-stream'
+            )
+        else:
+            # Return regular response
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    'http://localhost:1234/v1/chat/completions',
+                    headers={"Content-Type": "application/json"},
+                    json=completion_request
+                )
+            
+            if not response.ok:
+                error = await response.text()
+                raise HTTPException(status_code=response.status_code, detail=error)
+            
+            result = await response.json()
+            return LLMResponse(
+                id=result.id,
+                model=result.model,
+                content=result.choices[0].message.content,
+                finish_reason=result.choices[0].finish_reason,
+                usage=result.usage if hasattr(result, "usage") else None
+            )
+    except Exception as e:
+        print(f"LM Studio error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def stream_lmstudio_response(completion_request: dict):
+    """Stream LM Studio chat completion responses."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                'http://localhost:1234/v1/chat/completions',
+                headers={"Content-Type": "application/json"},
+                json=completion_request
+            )
+        
+        if not response.ok:
+            error = await response.text()
+            raise HTTPException(status_code=response.status_code, detail=error)
+        
+        async for line in response.aiter_lines():
+            if line.startswith('data: '):
+                try:
+                    data = json.loads(line[6:])  # Skip 'data: ' prefix
+                    content = data.get('choices', [{}])[0].get('delta', {}).get('content')
+                    if content:
+                        yield content
+                except Exception as e:
+                    print(f"Failed to parse LM Studio chunk: {e}")
+                    continue
+        
+        yield "data: [DONE]\n\n"
+    except Exception as e:
+        print(f"LM Studio streaming error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

@@ -14,6 +14,12 @@ export default defineConfig(({ mode }) => {
       'process.env.OPENAI_API_KEY': JSON.stringify(env.OPENAI_API_KEY),
       'process.env.CLAUDE_API_KEY': JSON.stringify(env.CLAUDE_API_KEY),
       'process.env.DEEPSEEK_API_KEY': JSON.stringify(env.DEEPSEEK_API_KEY),
+      'process.env.WEAVIATE_HOST': JSON.stringify(env.WEAVIATE_HOST),
+      'process.env.WEAVIATE_PORT': JSON.stringify(env.WEAVIATE_PORT),
+      'process.env.WEAVIATE_API_KEY': JSON.stringify(env.WEAVIATE_API_KEY),
+      'process.env.WEAVIATE_SCHEMA_CLASS': JSON.stringify(env.WEAVIATE_SCHEMA_CLASS),
+      'process.env.WEAVIATE_BATCH_SIZE': JSON.stringify(env.WEAVIATE_BATCH_SIZE),
+      'process.env.WEAVIATE_VECTORIZER_MODULE': JSON.stringify(env.WEAVIATE_VECTORIZER_MODULE),
       global: 'globalThis'
     },
     resolve: {

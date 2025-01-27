@@ -5,6 +5,8 @@ export interface DocumentMetadata {
   createdAt: number;
   type: string;
   tags?: string[];
+  chatId?: string;
+  timestamp?: number;
 }
 
 export interface Document {
@@ -36,7 +38,7 @@ class WeaviateService {
     return WeaviateService.instance;
   }
 
-  public async init(url: string) {
+  public async init(url: string, apiKey?: string) {
     if (!url) {
       throw new Error('Missing Weaviate URL');
     }
@@ -45,10 +47,17 @@ class WeaviateService {
       // Parse the URL to get scheme and host
       const parsedUrl = new URL(url);
       
-      this.client = weaviate.client({
+      const clientConfig: any = {
         scheme: parsedUrl.protocol.replace(':', ''),
         host: parsedUrl.host,
-      });
+      };
+
+      // Add API key if provided
+      if (apiKey) {
+        clientConfig.apiKey = new ApiKey(apiKey);
+      }
+
+      this.client = weaviate.client(clientConfig);
 
       // Verify connection by getting schema
       await this.client.schema.getter().do();
@@ -106,6 +115,33 @@ class WeaviateService {
       await this.client.data.deleter().withId(id).do();
     } catch (error) {
       console.error('Failed to delete document:', error);
+      throw error;
+    }
+  }
+
+  public async deleteDocumentsByChatId(chatId: string) {
+    if (!this.client) throw new Error('Weaviate client not initialized');
+
+    try {
+      // First get all documents with this chatId
+      const result = await this.client.graphql
+        .get()
+        .withClassName('Document')
+        .withFields('_additional { id }')
+        .withWhere({
+          path: ["metadata", "chatId"],
+          operator: "Equal",
+          valueString: chatId
+        })
+        .do();
+
+      // Then delete each document
+      const documents = result.data.Get.Document;
+      for (const doc of documents) {
+        await this.deleteDocument(doc._additional.id);
+      }
+    } catch (error) {
+      console.error('Failed to delete documents by chatId:', error);
       throw error;
     }
   }

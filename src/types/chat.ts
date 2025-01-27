@@ -1,9 +1,16 @@
+export interface FileAttachment {
+  name: string;
+  type: string;
+  uploadedAt: number;
+}
+
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'system' | 'user' | 'assistant';
   content: string;
   timestamp: number;
   conversationId?: string;
+  files?: FileAttachment[];
 }
 
 export interface ConversationState {

@@ -1,4 +1,3 @@
-import Anthropic from '@anthropic-ai/sdk';
 import type {
   LLMProvider,
   LLMMessage,
@@ -12,11 +11,11 @@ import { chromadb } from '../../chromadb';
 interface ModelConfig {
   contextWindow: number;
   maxOutputTokens: number;
-  supportsCitations: boolean;
+  supportsFunctionCalling: boolean;
   supportsVision: boolean;
+  supportsJson: boolean;
+  supportsReasoning: boolean;
 }
-
-type ClaudeRole = 'user' | 'assistant';
 
 class ClaudeProvider implements LLMProvider {
   public id = 'claude';
@@ -31,52 +30,40 @@ class ClaudeProvider implements LLMProvider {
   };
 
   private readonly modelConfigs: Record<string, ModelConfig> = {
-    // Claude 3.5 Models
-    'claude-3-5-sonnet-20241022': {
-      contextWindow: 200000,
-      maxOutputTokens: 8192,
-      supportsCitations: true,
-      supportsVision: true
-    },
-    'claude-3-5-haiku-20241022': {
-      contextWindow: 200000,
-      maxOutputTokens: 8192,
-      supportsCitations: true,
-      supportsVision: false
-    },
-    // Claude 3 Models
     'claude-3-opus-20240229': {
       contextWindow: 200000,
       maxOutputTokens: 4096,
-      supportsCitations: false,
-      supportsVision: true
+      supportsFunctionCalling: true,
+      supportsVision: true,
+      supportsJson: true,
+      supportsReasoning: true
     },
     'claude-3-sonnet-20240229': {
       contextWindow: 200000,
       maxOutputTokens: 4096,
-      supportsCitations: false,
-      supportsVision: true
+      supportsFunctionCalling: true,
+      supportsVision: true,
+      supportsJson: true,
+      supportsReasoning: true
     },
     'claude-3-haiku-20240307': {
       contextWindow: 200000,
       maxOutputTokens: 4096,
-      supportsCitations: false,
-      supportsVision: true
+      supportsFunctionCalling: true,
+      supportsVision: true,
+      supportsJson: true,
+      supportsReasoning: true
     }
   };
 
   public models = Object.keys(this.modelConfigs);
   public maxTokens = Math.max(...Object.values(this.modelConfigs).map(c => c.contextWindow));
 
-  private client: Anthropic;
   private currentModel: string;
   private currentSessionId: string | null = null;
 
   constructor(config: ClaudeConfig) {
-    this.client = new Anthropic({
-      apiKey: config.apiKey
-    });
-    this.currentModel = config.model || 'claude-3-5-sonnet-20241022';
+    this.currentModel = config.model || 'claude-3-opus-20240229';
   }
 
   private getModelConfig(model: string): ModelConfig {
@@ -87,20 +74,34 @@ class ClaudeProvider implements LLMProvider {
     return config;
   }
 
-  private convertToClaudeMessages(messages: LLMMessage[]): { role: ClaudeRole; content: string }[] {
-    return messages.map(msg => {
-      // Convert system messages to user messages for Claude
-      const role = msg.role === 'system' ? 'user' : msg.role as ClaudeRole;
-      return {
-        role,
-        content: msg.content
-      };
-    });
-  }
-
   public async initialize(): Promise<void> {
-    // No initialization needed for Claude
-    return;
+    try {
+      // Fetch available models from FastAPI
+      const response = await fetch('http://localhost:8001/anthropic/models');
+      const data = await response.json();
+      
+      // Update our models list with any new models from the API
+      const apiModels = data.data.map((model: any) => model.id);
+      for (const modelId of apiModels) {
+        if (!this.modelConfigs[modelId]) {
+          // Add new model with default capabilities
+          this.modelConfigs[modelId] = {
+            contextWindow: 200000,
+            maxOutputTokens: 4096,
+            supportsFunctionCalling: true,
+            supportsVision: true,
+            supportsJson: true,
+            supportsReasoning: true
+          };
+        }
+      }
+      
+      // Update models list
+      this.models = Object.keys(this.modelConfigs);
+    } catch (error) {
+      console.error('Failed to fetch Claude models:', error);
+      throw error;
+    }
   }
 
   public async listModels(): Promise<string[]> {
@@ -116,6 +117,17 @@ class ClaudeProvider implements LLMProvider {
 
   public setSessionId(sessionId: string): void {
     this.currentSessionId = sessionId;
+  }
+
+  private convertToClaudeMessages(messages: LLMMessage[]): { role: string; content: string }[] {
+    return messages.map(msg => {
+      // Convert system messages to user messages for Claude
+      const role = msg.role === 'system' ? 'user' : msg.role;
+      return {
+        role,
+        content: msg.content
+      };
+    });
   }
 
   public async chat(messages: LLMMessage[], config?: LLMConfig): Promise<LLMResponse> {
@@ -136,28 +148,43 @@ class ClaudeProvider implements LLMProvider {
     }
 
     try {
+      // Add system message for reasoning models if not present
+      if (modelConfig.supportsReasoning && !messages.some(m => m.role === 'system')) {
+        messages = [
+          {
+            role: 'system',
+            content: 'You are a reasoning model that excels at complex, multi-step tasks. Think carefully and break down problems into steps before responding.'
+          },
+          ...messages
+        ];
+      }
+
+      // Convert messages to Claude format
       const claudeMessages = this.convertToClaudeMessages(messages);
 
-      const response = await this.client.messages.create({
-        model,
-        max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
-        temperature: config?.temperature ?? 0.7,
-        messages: claudeMessages,
-        system: config?.system,
-        tools: config?.tools as any, // Type assertion since tools structure might vary
+      // Call FastAPI endpoint
+      const response = await fetch('http://localhost:8001/llm/claude', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: claudeMessages,
+          model,
+          temperature: config?.temperature ?? 0.7,
+          max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
+          tools: config?.tools,
+          tool_choice: config?.tool_choice,
+          response_format: modelConfig.supportsJson && config?.response_format ? config.response_format : undefined
+        }),
       });
 
-      const result: LLMResponse = {
-        id: response.id,
-        model: response.model,
-        content: response.content[0].type === 'text' ? response.content[0].text : '',
-        finish_reason: response.stop_reason || undefined,
-        usage: {
-          prompt_tokens: response.usage.input_tokens,
-          completion_tokens: response.usage.output_tokens,
-          total_tokens: response.usage.input_tokens + response.usage.output_tokens
-        }
-      };
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error);
+      }
+
+      const result = await response.json();
 
       // Cache response if session ID is set
       if (this.currentSessionId) {
@@ -186,26 +213,78 @@ class ClaudeProvider implements LLMProvider {
     const modelConfig = this.getModelConfig(model);
 
     try {
+      // Add system message for reasoning models if not present
+      if (modelConfig.supportsReasoning && !messages.some(m => m.role === 'system')) {
+        messages = [
+          {
+            role: 'system',
+            content: 'You are a reasoning model that excels at complex, multi-step tasks. Think carefully and break down problems into steps before responding.'
+          },
+          ...messages
+        ];
+      }
+
+      // Convert messages to Claude format
       const claudeMessages = this.convertToClaudeMessages(messages);
 
-      const stream = await this.client.messages.create({
-        model,
-        max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
-        temperature: config?.temperature ?? 0.7,
-        messages: claudeMessages,
-        system: config?.system,
-        tools: config?.tools as any,
-        stream: true
+      // Call FastAPI streaming endpoint
+      const response = await fetch('http://localhost:8001/llm/claude', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: claudeMessages,
+          model,
+          temperature: config?.temperature ?? 0.7,
+          max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
+          tools: config?.tools,
+          tool_choice: config?.tool_choice,
+          response_format: modelConfig.supportsJson && config?.response_format ? config.response_format : undefined,
+          stream: true
+        }),
       });
 
-      let content = '';
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error);
+      }
 
-      for await (const chunk of stream) {
-        if (chunk.type === 'content_block_delta') {
-          const delta = chunk.delta;
-          if ('text' in delta) {
-            content += delta.text;
-            callbacks.onChunk(delta.text);
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      let content = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        // Decode the chunk and add it to our buffer
+        buffer += new TextDecoder().decode(value);
+
+        // Process any complete lines in the buffer
+        while (buffer.includes('\n')) {
+          const lineEnd = buffer.indexOf('\n');
+          const line = buffer.slice(0, lineEnd).trim();
+          buffer = buffer.slice(lineEnd + 1);
+
+          if (line.startsWith('data: ')) {
+            const data = line.slice(5).trim();
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+                const text = parsed.delta.text;
+                content += text;
+                callbacks.onChunk(text);
+              }
+            } catch (e) {
+              console.warn('Failed to parse streaming response:', e);
+            }
           }
         }
       }
