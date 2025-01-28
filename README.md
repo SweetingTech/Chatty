@@ -55,6 +55,27 @@ A powerful and flexible application for managing and interacting with multiple L
 - Node.js 18 or higher
 - npm or yarn
 - A modern web browser
+- ChromaDB v0.6.0 or higher
+
+### ChromaDB v0.6.0 Migration
+
+The application has been updated to support ChromaDB v0.6.0, which includes several important changes:
+
+1. **Collection Listing**: ChromaDB now returns only collection names from `list_collections()` instead of full collection objects.
+2. **Storage Backend**: Uses SQLite by default instead of DuckDB+Parquet.
+3. **Client Initialization**: Uses the new `PersistentClient` class:
+   ```python
+   client = chromadb.PersistentClient(
+       path="./chroma_data",
+       settings=Settings(
+           anonymized_telemetry=False,
+           allow_reset=True,
+           is_persistent=True
+       )
+   )
+   ```
+
+These changes improve reliability and performance while maintaining compatibility with existing data.
 
 ### Installation
 

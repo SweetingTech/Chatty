@@ -1,7 +1,15 @@
 # Project TODO List
 
 ## Documentation Updates
-1. MCP Documentation
+1. ChromaDB v0.6.0 Migration
+   - Who: Core development team
+   - What: Update ChromaDB to v0.6.0
+   - When: Completed
+   - Where: start_chroma.py, chromadb.ts
+   - Why: Support new SQLite backend and collection listing
+   - How: Updated client initialization and API usage
+
+2. MCP Documentation
    - Who: Documentation team
    - What: Created mcp.md to explain MCP as tools
    - When: Completed
@@ -178,6 +186,10 @@
 
 ## Current Status
 - [x] Documentation updates completed
+  - [x] ChromaDB v0.6.0 migration docs
+  - [x] Updated architecture docs
+  - [x] Updated development docs
+  - [x] Updated database docs
 - [x] Base implementations completed
 - [x] Agent implementations completed
 - [x] Tool implementations completed
@@ -188,6 +200,11 @@
   - [x] Registry implementation
   - [x] Security layer
   - [x] Client implementation
+- [x] ChromaDB v0.6.0 migration completed
+  - [x] Updated client initialization
+  - [x] Fixed collection listing
+  - [x] SQLite storage migration
+  - [x] API compatibility updates
 - [ ] Testing pending
   - [ ] Unit tests
   - [ ] Integration tests

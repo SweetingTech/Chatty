@@ -9,6 +9,7 @@ This guide provides development setup instructions and best practices for the Mu
 ### 1. Prerequisites
 - Node.js 18+ (required for MCP servers)
 - Python 3.8+ (for ChromaDB)
+- ChromaDB v0.6.0+ (required for SQLite storage)
 - Git
 - VSCode (recommended)
 
@@ -33,15 +34,15 @@ cp .env.example .env
 # Service URLs
 VITE_WEAVIATE_URL=http://localhost:8080
 VITE_LM_STUDIO_URL=http://localhost:5000
-VITE_CHROMA_URL=http://localhost:8000
+VITE_CHROMA_URL=http://localhost:8001
 
 # API Keys
 VITE_OPENAI_API_KEY=your-key-here
 VITE_CLAUDE_API_KEY=your-key-here
 
-# ChromaDB Configuration
+# ChromaDB Configuration (v0.6.0+)
 CHROMA_HOST=localhost
-CHROMA_PORT=8000
+CHROMA_PORT=8001
 CHROMA_COLLECTION_NAME=chat_sessions
 ```
 
@@ -91,12 +92,28 @@ chatty/
 
 ### 1. Starting Development Server
 ```bash
-# Start ChromaDB
+# Start ChromaDB (v0.6.0+)
 python start_chroma.py
+# ChromaDB now uses SQLite by default, no additional configuration needed
 
 # Start development server
 npm run dev
 ```
+
+### ChromaDB v0.6.0+ Notes
+- Uses SQLite as default storage backend
+- Collection listing returns only names
+- Uses new PersistentClient initialization:
+  ```python
+  client = chromadb.PersistentClient(
+      path="./chroma_data",
+      settings=Settings(
+          anonymized_telemetry=False,
+          allow_reset=True,
+          is_persistent=True
+      )
+  )
+  ```
 
 ### 2. Running Tests
 ```bash

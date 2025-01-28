@@ -90,16 +90,26 @@ The Multi-LLM application is built with a modular, agent-based architecture that
 ### 4. Storage System
 
 #### Components
-- **ChromaDB**: Chat history and context
+- **ChromaDB (v0.6.0+)**: Chat history and context
+  - SQLite-based storage
+  - Collection name-based listing
+  - PersistentClient architecture
+  - Simplified API interface
 - **Weaviate**: Vector embeddings
 - **Local Storage**: Application state
 - **MCP Storage**: External capabilities
 
 #### Features
 - Data persistence
+  - SQLite for ChromaDB
+  - Vector storage for embeddings
+  - Local state caching
 - Vector search
 - State management
 - Backup/recovery
+  - SQLite backups for ChromaDB
+  - Vector database snapshots
+  - State synchronization
 - **MCP state tracking**
 
 ### 5. MCP System

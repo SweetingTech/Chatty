@@ -8,12 +8,18 @@ The Multi-LLM application uses multiple databases for different purposes:
 2. Weaviate - Vector Database for Embeddings
 3. Local Storage - Application State
 
-## ChromaDB
+## ChromaDB (v0.6.0+)
 
 ### Purpose
 - Stores chat history
 - Maintains conversation context
 - Enables semantic search across conversations
+
+### Version Changes
+ChromaDB v0.6.0 introduces several important changes:
+1. Collection listing returns only names (not full objects)
+2. Uses SQLite as default storage backend (replacing DuckDB+Parquet)
+3. New PersistentClient initialization pattern
 
 ### Collections
 
@@ -33,16 +39,31 @@ The Multi-LLM application uses multiple databases for different purposes:
      ```
 
 ### Default Configuration
-- Port: 8000
-- URL: http://localhost:8000
+- Port: 8001
+- URL: http://localhost:8001
 - Data Directory: ./chroma_data
+- Storage: SQLite (v0.6.0+)
 
 ### Access Methods
 ```typescript
+// Client initialization (v0.6.0+)
 const chromadb = ChromaDBClient.getInstance();
 await chromadb.init();
+
+// Collection operations
+const collections = await chromadb.listCollections(); // Returns array of strings
 await chromadb.saveChatSession(sessionId, messages);
 await chromadb.getChatSession(sessionId);
+
+// Python server initialization
+client = chromadb.PersistentClient(
+    path="./chroma_data",
+    settings=Settings(
+        anonymized_telemetry=False,
+        allow_reset=True,
+        is_persistent=True
+    )
+)
 ```
 
 ## Weaviate
