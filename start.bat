@@ -1,34 +1,34 @@
 @echo off
 setlocal enabledelayedexpansion
 
-:: Check if components are installed
-if not exist venv (
-    echo Virtual environment not found. Please run install.bat first.
-    pause
-    exit /b 1
-)
-
-if not exist node_modules (
-    echo Node modules not found. Please run install.bat first.
-    pause
-    exit /b 1
+:: Initialize the system
+echo Initializing system...
+node scripts/initialize-system.js
+if errorlevel 1 (
+    echo System initialization failed.
+    echo Running full setup...
+    call setup.bat
+    if errorlevel 1 (
+        echo Setup failed. Please check the error messages above.
+        pause
+        exit /b 1
+    )
 )
 
 :: Activate virtual environment
 call venv\Scripts\activate
 
-:: Check if ChromaDB server is already running
-echo Checking ChromaDB server...
+:: Check ChromaDB port
+echo Checking ChromaDB port...
 netstat -ano | findstr ":8001" > nul
 if %errorlevel% equ 0 (
-    echo ChromaDB server already running
-) else (
-    echo Starting ChromaDB server...
-    start cmd /k "python start_chroma.py"
-    echo Waiting for ChromaDB to initialize...
+    echo Port 8001 is in use. Attempting to kill process...
+    for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8001"') do (
+        taskkill /F /PID %%a
+    )
     timeout /t 2
 )
 
-:: Start the frontend
-echo Starting frontend...
-npm run dev
+:: Start everything in one window
+echo Starting services...
+npx concurrently -k "python start_chroma.py" "wait-on tcp:8001 && vite"

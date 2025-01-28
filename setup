@@ -1,0 +1,21 @@
+@echo off
+if "%1"=="" (
+    echo Chatty Setup Options:
+    echo.
+    echo Available commands:
+    echo   setup              Run normal setup
+    echo   setup --force      Force reinstall everything
+    echo   setup --reset      Reset and reinitialize databases
+    echo   setup --check      Check installation status
+    echo   install           Open interactive installation menu
+    echo.
+    echo For more options, run: setup --help
+    echo.
+    set /p choice="Run normal setup? [Y/N] "
+    if /i "!choice!"=="Y" (
+        call setup.bat
+    )
+) else (
+    call setup.bat %*
+)
+pause

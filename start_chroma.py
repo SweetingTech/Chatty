@@ -115,7 +115,7 @@ app.add_middleware(
     max_age=86400
 )
 
-# Initialize ChromaDB client
+# Initialize ChromaDB client with v0.6.0 settings
 client = chromadb.PersistentClient(
     path="./chroma_data",
     settings=Settings(
@@ -125,32 +125,104 @@ client = chromadb.PersistentClient(
     )
 )
 
-# Initialize default collections with proper error handling
-async def init_default_collections():
-    default_collections = {
-        'chat_sessions': 'Stores chat session history',
-        'agent_modifications': 'Stores modifications to default agents',
-        'tool_modifications': 'Stores modifications to default tools',
-        'user_settings': 'Stores user settings and preferences'
+# Default collections that should exist
+DEFAULT_COLLECTIONS = [
+    {
+        'name': 'chat_sessions',
+        'description': 'Stores chat session history and metadata'
+    },
+    {
+        'name': 'agent_modifications',
+        'description': 'Stores modifications to default agents'
+    },
+    {
+        'name': 'tool_modifications',
+        'description': 'Stores modifications to default tools'
+    },
+    {
+        'name': 'additional_agents',
+        'description': 'Stores additional custom agents'
+    },
+    {
+        'name': 'additional_tools',
+        'description': 'Stores additional custom tools'
+    },
+    {
+        'name': 'user_settings',
+        'description': 'Stores user settings and API keys',
+        'initial_data': {
+            'ids': ['api_keys'],
+            'metadatas': [{'timestamp': int(time.time() * 1000), 'type': 'settings'}],
+            'documents': [json.dumps({
+                'openaiKey': os.getenv('VITE_OPENAI_API_KEY', ''),
+                'claudeKey': os.getenv('VITE_CLAUDE_API_KEY', ''),
+                'deepseekKey': os.getenv('VITE_DEEPSEEK_API_KEY', ''),
+                'lmStudioHost': os.getenv('VITE_LM_STUDIO_HOST', 'localhost'),
+                'lmStudioPort': os.getenv('VITE_LM_STUDIO_PORT', '1234')
+            })]
+        }
     }
-    
-    for name, description in default_collections.items():
-        try:
+]
+
+def ensure_collections(retries=5, delay=1):
+    """Create all required collections if they don't exist."""
+    print("Initializing collections...")
+    for collection_info in DEFAULT_COLLECTIONS:
+        collection = None
+        for attempt in range(retries):
             try:
-                # Try to get existing collection
-                client.get_collection(name=name)
-            except ValueError:
-                # Create if it doesn't exist
-                client.create_collection(
-                    name=name,
-                    metadata={"description": description}
-                )
-        except Exception as e:
-            print(f"Error initializing collection {name}: {str(e)}")
+                # Try to create collection directly
+                try:
+                    collection = client.create_collection(
+                        name=collection_info['name'],
+                        metadata={
+                            'description': collection_info['description'],
+                            'hnsw:space': 'cosine',
+                            'hnsw:construction_ef': 100,
+                            'hnsw:search_ef': 50
+                        }
+                    )
+                    print(f"Created collection {collection_info['name']}")
+                except Exception as e:
+                    if "already exists" in str(e):
+                        collection = client.get_collection(collection_info['name'])
+                        print(f"Collection {collection_info['name']} already exists")
+                    else:
+                        raise
+
+                # Collection exists or was created, now add initial data if needed
+                if collection and 'initial_data' in collection_info:
+                    try:
+                        # Check if data already exists
+                        existing = collection.get(ids=collection_info['initial_data']['ids'])
+                        if not existing['ids']:
+                            collection.add(**collection_info['initial_data'])
+                            print(f"Added initial data to {collection_info['name']}")
+                        else:
+                            print(f"Initial data already exists in {collection_info['name']}")
+                    except Exception as e:
+                        print(f"Warning: Failed to add initial data to {collection_info['name']}: {str(e)}")
+                        # Continue even if initial data fails - the collection exists
+
+                # If we get here, collection is ready
+                break
+
+            except Exception as e:
+                if attempt == retries - 1:
+                    print(f"Error ensuring collection {collection_info['name']} after {retries} attempts: {str(e)}")
+                    raise
+                print(f"Attempt {attempt + 1} failed, retrying in {delay} seconds...")
+                time.sleep(delay)
 
 @app.on_event("startup")
 async def startup_event():
-    await init_default_collections()
+    try:
+        # Create collections before starting API
+        ensure_collections()
+        print("ChromaDB server ready to accept connections")
+    except Exception as e:
+        print(f"Failed to initialize ChromaDB: {str(e)}")
+        print("Server will continue starting - collections will be created on demand")
 
 @app.get("/")
 async def root():
@@ -176,9 +248,8 @@ async def heartbeat_head():
 async def list_collections():
     """List all collection names (v0.6.x compatible)"""
     try:
-        collections = client.list_collections()
-        # Return only collection names as per v0.6.x API
-        return [collection.name for collection in collections]
+        # In v0.6.0, list_collections() returns just the names
+        return client.list_collections()
     except Exception as e:
         print(f"Error listing collections: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -202,14 +273,7 @@ async def get_collection(collection_name: str):
 async def create_collection(collection_data: CollectionModel):
     """Create a new collection"""
     try:
-        # Check if collection exists
-        try:
-            client.get_collection(collection_data.name)
-            raise HTTPException(status_code=400, detail="Collection already exists")
-        except ValueError:
-            pass
-
-        # Create collection
+        # Try to create collection directly
         collection = client.create_collection(
             name=collection_data.name,
             metadata=collection_data.metadata
@@ -219,9 +283,19 @@ async def create_collection(collection_data: CollectionModel):
             "name": collection.name,
             "metadata": collection.metadata
         }
-    except HTTPException:
-        raise
     except Exception as e:
+        # If collection already exists, that's fine
+        if "already exists" in str(e):
+            try:
+                collection = client.get_collection(collection_data.name)
+                return {
+                    "name": collection.name,
+                    "metadata": collection.metadata
+                }
+            except Exception as inner_e:
+                print(f"Error getting existing collection: {str(inner_e)}")
+                raise HTTPException(status_code=500, detail=str(inner_e))
+        
         print(f"Error creating collection: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -284,6 +358,112 @@ async def delete_collection(collection_name: str):
         raise HTTPException(status_code=404, detail=f"Collection {collection_name} not found")
     except Exception as e:
         print(f"Error deleting collection: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Session Management Endpoints
+
+@app.get("/sessions")
+async def get_sessions():
+    """Get all chat sessions"""
+    try:
+        try:
+            collection = client.get_collection('chat_sessions')
+        except ValueError:
+            # Return empty list if collection doesn't exist
+            return []
+            
+        result = collection.get()
+        sessions = []
+        for i, doc in enumerate(result['documents']):
+            try:
+                messages = json.loads(doc) if isinstance(doc, str) else doc
+                metadata = result['metadatas'][i] or {}
+                sessions.append({
+                    'id': result['ids'][i],
+                    'messages': messages,
+                    'metadata': metadata
+                })
+            except json.JSONDecodeError as e:
+                print(f"Error parsing session document: {e}")
+                continue
+        return sessions
+    except Exception as e:
+        print(f"Error getting sessions: {str(e)}")
+        # Return empty list for any error to avoid frontend issues
+        return []
+
+@app.get("/sessions/{session_id}")
+async def get_session(session_id: str):
+    """Get a specific chat session"""
+    try:
+        collection = client.get_collection('chat_sessions')
+        result = collection.get(ids=[session_id])
+        
+        if not result['ids']:
+            raise HTTPException(status_code=404, detail="Session not found")
+            
+        doc = result['documents'][0]
+        messages = json.loads(doc) if isinstance(doc, str) else doc
+        return {
+            'id': session_id,
+            'messages': messages,
+            'metadata': result['metadatas'][0] or {}
+        }
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Chat sessions collection not found")
+    except Exception as e:
+        print(f"Error getting session: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/sessions")
+async def create_session(request: Request):
+    """Create or update a chat session"""
+    try:
+        data = await request.json()
+        session_id = data.get('id')
+        messages = data.get('messages', [])
+        metadata = data.get('metadata', {})
+        
+        if not session_id:
+            raise HTTPException(status_code=400, detail="Session ID is required")
+            
+        collection = client.get_collection('chat_sessions')
+        
+        # Delete existing session if it exists
+        try:
+            collection.delete(ids=[session_id])
+        except Exception:
+            pass  # Ignore if session doesn't exist
+            
+        # Add new session
+        collection.add(
+            ids=[session_id],
+            documents=[json.dumps(messages) if isinstance(messages, list) else messages],
+            metadatas=[{
+                **metadata,
+                'timestamp': int(time.time() * 1000),
+                'type': 'chat_session'
+            }]
+        )
+        
+        return {"status": "success", "id": session_id}
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Chat sessions collection not found")
+    except Exception as e:
+        print(f"Error creating/updating session: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a chat session"""
+    try:
+        collection = client.get_collection('chat_sessions')
+        collection.delete(ids=[session_id])
+        return {"status": "success"}
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Chat sessions collection not found")
+    except Exception as e:
+        print(f"Error deleting session: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

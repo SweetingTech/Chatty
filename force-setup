@@ -1,0 +1,9 @@
+@echo off
+echo This will force reinstall all components and reset databases.
+echo This operation cannot be undone.
+echo.
+set /p choice="Are you sure you want to continue? [Y/N] "
+if /i "%choice%"=="Y" (
+    call setup.bat --force
+)
+pause

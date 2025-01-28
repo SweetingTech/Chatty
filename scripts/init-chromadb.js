@@ -1,5 +1,6 @@
 import * as dotenv from 'dotenv';
 import fetch from 'node-fetch';
+import { spawn } from 'child_process';
 
 // Load environment variables
 dotenv.config();
@@ -12,13 +13,38 @@ async function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function tryConnect(retries = 5, delay = 2000) {
+async function tryConnect(retries = 30, delay = 1000) {
   for (let i = 0; i < retries; i++) {
     try {
       const response = await fetch(`${CHROMA_URL}/heartbeat`);
-      if (response.ok) return;
+      if (response.ok) {
+        console.log('Successfully connected to ChromaDB');
+        return;
+      }
     } catch (error) {
-      if (i === retries - 1) throw error;
+      if (i === retries - 1) {
+        console.log('Starting ChromaDB server...');
+        const pythonCmd = process.platform === 'win32' ? '.\\venv\\Scripts\\python' : './venv/bin/python';
+        const chromaServer = spawn(pythonCmd, ['start_chroma.py'], {
+          stdio: 'inherit',
+          detached: true
+        });
+        chromaServer.unref();
+        
+        // Wait for the server to start
+        for (let j = 0; j < retries; j++) {
+          try {
+            const response = await fetch(`${CHROMA_URL}/heartbeat`);
+            if (response.ok) {
+              console.log('ChromaDB server is ready');
+              return;
+            }
+          } catch (e) {
+            if (j === retries - 1) throw new Error('Failed to start ChromaDB server');
+            await wait(delay);
+          }
+        }
+      }
       console.log(`Connection attempt ${i + 1} failed, retrying in ${delay/1000} seconds...`);
       await wait(delay);
     }

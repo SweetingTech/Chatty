@@ -158,10 +158,14 @@ export class ChromaDBClient implements IChromaDBClient {
         throw new Error(`Failed to load collections. HTTP ${response.status}: ${errorDetails}`);
       }
 
-      const collectionNames = await response.json();
-      if (!Array.isArray(collectionNames)) {
-        throw new Error('Expected array of collection names');
-      }
+      const data = await response.json();
+      // Handle both v0.6.0 array of names and older format
+      const collectionNames = Array.isArray(data) ? data : 
+                            Array.isArray(data.collections) ? data.collections.map((c: { name: string }) => c.name) : 
+                            [];
+
+      // Log for debugging
+      console.log('Loaded collections:', collectionNames);
 
       // Clear existing collections
       this.collections.clear();

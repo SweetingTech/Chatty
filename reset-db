@@ -1,0 +1,34 @@
+@echo off
+echo Chatty Database Reset Options
+echo ===========================
+echo.
+echo 1. Reset all databases
+echo 2. Reset ChromaDB only
+echo 3. Reset Weaviate only
+echo 4. Cancel
+echo.
+set /p choice="Enter your choice (1-4): "
+
+if "%choice%"=="1" (
+    echo.
+    echo This will reset ALL databases. This operation cannot be undone.
+    set /p confirm="Are you sure? [Y/N] "
+    if /i "!confirm!"=="Y" (
+        call setup.bat --reset
+    )
+) else if "%choice%"=="2" (
+    echo.
+    echo This will reset ChromaDB. This operation cannot be undone.
+    set /p confirm="Are you sure? [Y/N] "
+    if /i "!confirm!"=="Y" (
+        call setup.bat --reset-chroma
+    )
+) else if "%choice%"=="3" (
+    echo.
+    echo This will reset Weaviate. This operation cannot be undone.
+    set /p confirm="Are you sure? [Y/N] "
+    if /i "!confirm!"=="Y" (
+        call setup.bat --reset-weaviate
+    )
+)
+pause
