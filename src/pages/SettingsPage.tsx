@@ -61,6 +61,10 @@ export function SettingsPage() {
     updateLLMConfig(provider, { apiKey });
   }, [updateLLMConfig]);
 
+  const handleUpdateModel = useCallback((provider: ProviderType, model: string) => {
+    updateLLMConfig(provider, { model });
+  }, [updateLLMConfig]);
+
   return (
     <div className="h-full">
       <h1 className="text-2xl font-bold mb-4">Settings</h1>
@@ -125,13 +129,33 @@ export function SettingsPage() {
                     {llmConfigs?.openai?.isDefault ? 'Default' : 'Set as Default'}
                   </button>
                 </div>
-                    <input
-                      type="password"
-                      value={llmConfigs?.openai?.apiKey || ''}
-                      onChange={(e) => handleUpdateApiKey('openai', e.target.value)}
-                      placeholder="OpenAI API Key"
-                      className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    />
+                <div className="space-y-2">
+                  <input
+                    type="password"
+                    value={llmConfigs?.openai?.apiKey || ''}
+                    onChange={(e) => handleUpdateApiKey('openai', e.target.value)}
+                    placeholder="OpenAI API Key"
+                    className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
+                  <select
+                    value={llmConfigs?.openai?.model || 'gpt-3.5-turbo-0125'}
+                    onChange={(e) => handleUpdateModel('openai', e.target.value)}
+                    className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  >
+                    <optgroup label="O1 Models">
+                      <option value="o1">O1</option>
+                      <option value="o1-mini">O1 Mini</option>
+                    </optgroup>
+                    <optgroup label="GPT-4 Models">
+                      <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                      <option value="gpt-4">GPT-4</option>
+                    </optgroup>
+                    <optgroup label="GPT-3.5 Models">
+                      <option value="gpt-3.5-turbo-0125">GPT-3.5 Turbo (0125)</option>
+                      <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                    </optgroup>
+                  </select>
+                </div>
               </div>
 
               {/* Claude */}

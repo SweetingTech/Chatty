@@ -139,35 +139,67 @@ export class ChromaDBClient implements IChromaDBClient {
   }
 
   private async loadCollections(): Promise<void> {
-    const response = await this.retryOperation(() =>
-      fetch(`${this.baseUrl}/collections`, {
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          'X-Browser-ID': this.getBrowserId(),
-          'X-Client-ID': this.getClientId()
-        },
-        mode: 'cors'
-      })
-    );
+    try {
+      // Get collection names (v0.6.x API)
+      const response = await this.retryOperation(() =>
+        fetch(`${this.baseUrl}/collections`, {
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-Browser-ID': this.getBrowserId(),
+            'X-Client-ID': this.getClientId()
+          },
+          mode: 'cors'
+        })
+      );
 
-    if (!response.ok) {
-      const errorDetails = await response.text();
-      throw new Error(`Failed to load collections. HTTP ${response.status}: ${errorDetails}`);
-    }
+      if (!response.ok) {
+        const errorDetails = await response.text();
+        throw new Error(`Failed to load collections. HTTP ${response.status}: ${errorDetails}`);
+      }
 
-    const data = await response.json();
-    if (Array.isArray(data)) {
+      const collectionNames = await response.json();
+      if (!Array.isArray(collectionNames)) {
+        throw new Error('Expected array of collection names');
+      }
+
+      // Clear existing collections
       this.collections.clear();
-      data.forEach((item: any) => {
-        if (item?.name && typeof item.name === 'string') {
-          this.collections.set(item.name, {
-            name: item.name,
-            metadata: item.metadata || {},
-            documents: item.documents || []
+
+      // Load each collection's details
+      for (const name of collectionNames) {
+        try {
+          const collectionResponse = await this.retryOperation(() =>
+            fetch(`${this.baseUrl}/collections/${name}`, {
+              headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-Browser-ID': this.getBrowserId(),
+                'X-Client-ID': this.getClientId()
+              },
+              mode: 'cors'
+            })
+          );
+
+          if (!collectionResponse.ok) {
+            console.warn(`Failed to get details for collection "${name}"`);
+            continue;
+          }
+
+          const collectionData = await collectionResponse.json();
+          this.collections.set(name, {
+            name,
+            metadata: collectionData.metadata || {},
+            documents: [] // Documents are loaded on-demand
           });
+        } catch (error) {
+          console.warn(`Failed to load collection "${name}":`, error);
+          // Continue with other collections even if one fails
         }
-      });
+      }
+    } catch (error) {
+      console.error('Failed to load collections:', error);
+      throw error;
     }
   }
 

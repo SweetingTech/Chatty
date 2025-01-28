@@ -50,15 +50,7 @@ class OpenAIProvider implements LLMProvider {
       supportsJson: true,
       supportsReasoning: true
     },
-    'o1-preview': {
-      contextWindow: 128000,
-      maxOutputTokens: 32768,
-      supportsFunctionCalling: true,
-      supportsVision: true,
-      supportsJson: true,
-      supportsReasoning: true
-    },
-    // GPT-4 Turbo
+    // GPT-4 Models
     'gpt-4-turbo': {
       contextWindow: 128000,
       maxOutputTokens: 4096,
@@ -67,23 +59,6 @@ class OpenAIProvider implements LLMProvider {
       supportsJson: true,
       supportsReasoning: false
     },
-    'gpt-4-0125-preview': {
-      contextWindow: 128000,
-      maxOutputTokens: 4096,
-      supportsFunctionCalling: true,
-      supportsVision: false,
-      supportsJson: true,
-      supportsReasoning: false
-    },
-    'gpt-4-1106-preview': {
-      contextWindow: 128000,
-      maxOutputTokens: 4096,
-      supportsFunctionCalling: true,
-      supportsVision: false,
-      supportsJson: true,
-      supportsReasoning: false
-    },
-    // GPT-4
     'gpt-4': {
       contextWindow: 8192,
       maxOutputTokens: 8192,
@@ -92,15 +67,7 @@ class OpenAIProvider implements LLMProvider {
       supportsJson: false,
       supportsReasoning: false
     },
-    'gpt-4-0613': {
-      contextWindow: 8192,
-      maxOutputTokens: 8192,
-      supportsFunctionCalling: true,
-      supportsVision: false,
-      supportsJson: false,
-      supportsReasoning: false
-    },
-    // GPT-3.5 Turbo
+    // GPT-3.5 Models
     'gpt-3.5-turbo-0125': {
       contextWindow: 16385,
       maxOutputTokens: 4096,
@@ -109,20 +76,12 @@ class OpenAIProvider implements LLMProvider {
       supportsJson: true,
       supportsReasoning: false
     },
-    'gpt-3.5-turbo-1106': {
+    'gpt-3.5-turbo': {
       contextWindow: 16385,
       maxOutputTokens: 4096,
       supportsFunctionCalling: true,
       supportsVision: false,
       supportsJson: true,
-      supportsReasoning: false
-    },
-    'gpt-3.5-turbo-instruct': {
-      contextWindow: 4096,
-      maxOutputTokens: 4096,
-      supportsFunctionCalling: false,
-      supportsVision: false,
-      supportsJson: false,
       supportsReasoning: false
     }
   };
@@ -134,15 +93,32 @@ class OpenAIProvider implements LLMProvider {
   private currentSessionId: string | null = null;
 
   constructor(config: OpenAIConfig) {
-    this.currentModel = config.model || 'gpt-3.5-turbo-0125';
+    // Set current model, ensuring it exists in configs
+    const requestedModel = config.model || 'gpt-3.5-turbo-0125';
+    if (!this.modelConfigs[requestedModel]) {
+      console.warn(`Requested model ${requestedModel} not found, falling back to gpt-3.5-turbo-0125`);
+      this.currentModel = 'gpt-3.5-turbo-0125';
+    } else {
+      this.currentModel = requestedModel;
+    }
+    console.log('OpenAI provider initialized with model:', this.currentModel);
   }
 
   private getModelConfig(model: string): ModelConfig {
-    const config = this.modelConfigs[model];
-    if (!config) {
-      throw new Error(`Unsupported model: ${model}`);
+    // If no model specified, use current model
+    if (!model) {
+      return this.modelConfigs[this.currentModel];
     }
-    return config;
+
+    // If model exists in configs, use it
+    const config = this.modelConfigs[model];
+    if (config) {
+      return config;
+    }
+
+    // If model not found, use current model's config
+    console.warn(`Model ${model} not found, using ${this.currentModel}`);
+    return this.modelConfigs[this.currentModel];
   }
 
   private convertToOpenAIMessages(messages: LLMMessage[]): OpenAI.Chat.ChatCompletionMessageParam[] {
@@ -163,34 +139,9 @@ class OpenAIProvider implements LLMProvider {
   }
 
   public async initialize(): Promise<void> {
-    try {
-      // Fetch available models from FastAPI
-      const response = await fetch('http://localhost:8001/openai/models');
-      const data = await response.json();
-      
-      // Update our models list with any new models from the API
-      const apiModels = data.models.map((model: any) => model.id);
-      for (const modelId of apiModels) {
-        if (!this.modelConfigs[modelId]) {
-          // Add new model with default capabilities based on model name
-          const isGPT4 = modelId.includes('gpt-4');
-          this.modelConfigs[modelId] = {
-            contextWindow: isGPT4 ? 128000 : 16385,
-            maxOutputTokens: 4096,
-            supportsFunctionCalling: true,
-            supportsVision: false,
-            supportsJson: true,
-            supportsReasoning: false
-          };
-        }
-      }
-      
-      // Update models list
-      this.models = Object.keys(this.modelConfigs);
-    } catch (error) {
-      console.error('Failed to fetch OpenAI models:', error);
-      throw error;
-    }
+    // No need to fetch models anymore, just log the available ones
+    console.log('Available OpenAI models:', this.models);
+    console.log('Current model:', this.currentModel);
   }
 
   public async listModels(): Promise<string[]> {
@@ -259,7 +210,7 @@ class OpenAIProvider implements LLMProvider {
 
       if (!response.ok) {
         const error = await response.text();
-        throw new Error(error);
+        throw new Error(`OpenAI API call failed. HTTP ${response.status}: ${error}`);
       }
 
       const result = await response.json();
@@ -325,7 +276,7 @@ class OpenAIProvider implements LLMProvider {
 
       if (!response.ok) {
         const error = await response.text();
-        throw new Error(error);
+        throw new Error(`OpenAI stream API call failed. HTTP ${response.status}: ${error}`);
       }
 
       const reader = response.body?.getReader();

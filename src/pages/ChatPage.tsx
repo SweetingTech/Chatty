@@ -1,11 +1,13 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../store';
 import { ChatSidebar } from '../components/ChatSidebar';
 import { ChatMessage } from '../components/ChatMessage';
 import { ChatInput } from '../components/ChatInput';
+import { LoadingMessage } from '../components/LoadingMessage';
 import { ChatAgent, type ChatAgentConfig } from '../lib/agents/chat';
 import type { ProviderType } from '../types';
 import { weaviateService } from '../lib/weaviate';
+import '../styles/loading.css';
 
 // Internal component with all the logic
 function ChatPageComponent() {
@@ -19,6 +21,7 @@ function ChatPageComponent() {
   } = useAppStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatAgentRef = useRef<ChatAgent>();
+  const [isLoading, setIsLoading] = useState(false);
 
   // Track initialization state
   const initializingRef = useRef(false);
@@ -101,7 +104,7 @@ function ChatPageComponent() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [currentChat?.messages]);
+  }, [currentChat?.messages, isLoading]);
 
   const handleSendMessage = async (content: string, files?: File[]) => {
     if (!chatAgentRef.current) {
@@ -109,92 +112,110 @@ function ChatPageComponent() {
       return;
     }
 
-    // Create new session if none exists
-    let sessionId = currentChatId;
-    if (!sessionId) {
-      sessionId = crypto.randomUUID();
-      const newSession = {
-        id: sessionId,
-        title: content.slice(0, 30) + (content.length > 30 ? '...' : ''),
-        messages: [],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      addChatSession(newSession);
-    }
-
-    // Handle file uploads first if any
-    let fileReferences = [];
-    if (files && files.length > 0) {
-      for (const file of files) {
-        const content = await file.text();
-        try {
-          // Store in Weaviate with chat session reference
-          await weaviateService.addDocument({
-            title: file.name,
-            content,
-            metadata: {
-              chatId: sessionId,
-              type: 'chat_upload',
-              timestamp: Date.now(),
-              createdAt: Date.now()
-            }
-          });
-          fileReferences.push({
-            name: file.name,
-            type: file.type,
-            uploadedAt: Date.now()
-          });
-        } catch (error) {
-          console.error('Failed to store file in Weaviate:', error);
-        }
-      }
-    }
-
-    // Add user message with file references
-    const userMessage = {
-      id: crypto.randomUUID(),
-      role: 'user' as const,
-      content,
-      timestamp: Date.now(),
-      conversationId: sessionId,
-      files: fileReferences
-    };
-    updateChatSession(sessionId, {
-      messages: [...(currentChat?.messages || []), userMessage],
-      updatedAt: Date.now(),
-    });
+    setIsLoading(true);
 
     try {
-      // Process message through chat agent
-      console.log('Sending message to agent:', { 
-        sessionId, 
-        content,
-        providerInfo: chatAgentRef.current.getProviderInfo(),
-        configInfo: chatAgentRef.current.getConfigInfo()
-      });
-
-      const agentResponse = await chatAgentRef.current.handleRequest({
-        payload: {
-          conversationId: sessionId,
-          message: content,
-        }
-      });
-
-      console.log('Received agent response:', agentResponse);
-
-      if (agentResponse.success) {
-        // Update chat session with the conversation from the agent
-        updateChatSession(sessionId, {
-          messages: agentResponse.data.conversation.messages,
+      // Create new session if none exists
+      let sessionId = currentChatId;
+      if (!sessionId) {
+        sessionId = crypto.randomUUID();
+        const newSession = {
+          id: sessionId,
+          title: content.slice(0, 30) + (content.length > 30 ? '...' : ''),
+          messages: [],
+          createdAt: Date.now(),
           updatedAt: Date.now(),
+        };
+        addChatSession(newSession);
+      }
+
+      // Handle file uploads first if any
+      let fileReferences = [];
+      if (files && files.length > 0) {
+        for (const file of files) {
+          const content = await file.text();
+          try {
+            // Store in Weaviate with chat session reference
+            await weaviateService.addDocument({
+              title: file.name,
+              content,
+              metadata: {
+                chatId: sessionId,
+                type: 'chat_upload',
+                timestamp: Date.now(),
+                createdAt: Date.now()
+              }
+            });
+            fileReferences.push({
+              name: file.name,
+              type: file.type,
+              uploadedAt: Date.now()
+            });
+          } catch (error) {
+            console.error('Failed to store file in Weaviate:', error);
+          }
+        }
+      }
+
+      // Add user message with file references
+      const userMessage = {
+        id: crypto.randomUUID(),
+        role: 'user' as const,
+        content,
+        timestamp: Date.now(),
+        conversationId: sessionId,
+        files: fileReferences
+      };
+      updateChatSession(sessionId, {
+        messages: [...(currentChat?.messages || []), userMessage],
+        updatedAt: Date.now(),
+      });
+
+      try {
+        // Process message through chat agent
+        console.log('Sending message to agent:', { 
+          sessionId, 
+          content,
+          providerInfo: chatAgentRef.current.getProviderInfo(),
+          configInfo: chatAgentRef.current.getConfigInfo()
         });
-      } else {
+
+        const agentResponse = await chatAgentRef.current.handleRequest({
+          payload: {
+            conversationId: sessionId,
+            message: content,
+          }
+        });
+
+        console.log('Received agent response:', agentResponse);
+
+        if (agentResponse.success) {
+          // Update chat session with the conversation from the agent
+          updateChatSession(sessionId, {
+            messages: agentResponse.data.conversation.messages,
+            updatedAt: Date.now(),
+          });
+        } else {
+          // Add error message to the chat
+          const errorMessage = {
+            id: crypto.randomUUID(),
+            role: 'assistant' as const,
+            content: `Error: ${agentResponse.error || 'Failed to process message'}`,
+            timestamp: Date.now(),
+            conversationId: sessionId,
+          };
+          updateChatSession(sessionId, {
+            messages: [...(currentChat?.messages || []), errorMessage],
+            updatedAt: Date.now(),
+          });
+          console.error('Agent processing failed:', agentResponse.error);
+        }
+      } catch (error) {
         // Add error message to the chat
         const errorMessage = {
           id: crypto.randomUUID(),
           role: 'assistant' as const,
-          content: `Error: ${agentResponse.error || 'Failed to process message'}`,
+          content: `Error: ${error instanceof Error ? error.message : 'Failed to process message'}`,
           timestamp: Date.now(),
           conversationId: sessionId,
         };
@@ -202,31 +223,19 @@ function ChatPageComponent() {
           messages: [...(currentChat?.messages || []), errorMessage],
           updatedAt: Date.now(),
         });
-        console.error('Agent processing failed:', agentResponse.error);
-      }
-    } catch (error) {
-      // Add error message to the chat
-      const errorMessage = {
-        id: crypto.randomUUID(),
-        role: 'assistant' as const,
-        content: `Error: ${error instanceof Error ? error.message : 'Failed to process message'}`,
-        timestamp: Date.now(),
-        conversationId: sessionId,
-      };
-      updateChatSession(sessionId, {
-        messages: [...(currentChat?.messages || []), errorMessage],
-        updatedAt: Date.now(),
-      });
-      console.error('Failed to process message through agent:', error);
+        console.error('Failed to process message through agent:', error);
 
-      // Clean up Weaviate documents if message processing failed
-      if (fileReferences.length > 0) {
-        try {
-          await weaviateService.deleteDocumentsByChatId(sessionId);
-        } catch (cleanupError) {
-          console.error('Failed to clean up Weaviate documents:', cleanupError);
+        // Clean up Weaviate documents if message processing failed
+        if (fileReferences.length > 0) {
+          try {
+            await weaviateService.deleteDocumentsByChatId(sessionId);
+          } catch (cleanupError) {
+            console.error('Failed to clean up Weaviate documents:', cleanupError);
+          }
         }
       }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -236,15 +245,16 @@ function ChatPageComponent() {
       <div className="flex-1 flex flex-col">
         {currentChatId ? (
           <>
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto bg-gray-50">
               {currentChat?.messages.map((message) => (
                 <ChatMessage key={message.id} message={message} />
               ))}
+              {isLoading && <LoadingMessage />}
               <div ref={messagesEndRef} />
             </div>
             <ChatInput
               onSendMessage={handleSendMessage}
-              disabled={!chatAgentRef.current}
+              disabled={!chatAgentRef.current || isLoading}
             />
           </>
         ) : (

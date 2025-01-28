@@ -1,0 +1,20 @@
+.loader {
+  display: flex;
+  gap: 8px;
+}
+
+.loader .dot {
+  width: 8px;
+  height: 8px;
+  background: #006D8F;
+  border-radius: 50%;
+  animation: scale 750ms ease-in-out infinite;
+}
+
+.loader .dot:nth-child(2) { animation-delay: 250.0ms; }
+.loader .dot:nth-child(3) { animation-delay: 500.0ms; }
+
+@keyframes scale {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.3); opacity: 0.5; }
+}

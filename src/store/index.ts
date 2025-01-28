@@ -165,7 +165,7 @@ export const useAppStore = create<AppState>((set, get) => {
         enabled: true,
         isDefault: false,
         apiKey: VITE_OPENAI_API_KEY,
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-3.5-turbo-0125', // Updated to use the latest model
         temperature: 0.7,
         maxTokens: 2000,
       },

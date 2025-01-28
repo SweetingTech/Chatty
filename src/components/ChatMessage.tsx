@@ -11,43 +11,45 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
   return (
     <div
-      className={`flex items-start space-x-3 p-4 ${
-        isUser ? 'bg-blue-50' : 'bg-white'
-      }`}
+      className={`flex ${isUser ? 'justify-end' : 'justify-start'} p-4`}
     >
-      <div
-        className={`p-2 rounded-full ${
-          isUser ? 'bg-blue-500 text-white' : 'bg-gray-100'
-        }`}
-      >
-        {isUser ? <User size={20} /> : <Bot size={20} />}
-      </div>
-      <div className="flex-1">
-        <div className="font-medium">{isUser ? 'You' : 'Assistant'}</div>
-        <div className="mt-1">
-          <div className="text-gray-700 whitespace-pre-wrap">
-            {message.content}
-          </div>
-          {message.files && message.files.length > 0 && (
-            <div className="mt-2 space-y-1">
-              {message.files.map((file: FileAttachment) => (
-                <div
-                  key={file.name}
-                  className="flex items-center space-x-2 text-sm text-gray-600 bg-gray-50 rounded p-2"
-                >
-                  <Paperclip size={14} />
-                  <span>{file.name}</span>
-                  <span className="text-gray-400">
-                    {new Date(file.uploadedAt).toLocaleTimeString()}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+      <div className={`flex items-start space-x-3 max-w-[80%] ${
+        isUser ? 'bg-blue-50' : 'bg-white'
+      } rounded-lg p-3`}>
+        <div
+          className={`p-2 rounded-full ${
+            isUser ? 'bg-blue-500 text-white' : 'bg-gray-100'
+          }`}
+        >
+          {isUser ? <User size={20} /> : <Bot size={20} />}
         </div>
-      </div>
-      <div className="text-xs text-gray-400">
-        {new Date(message.timestamp).toLocaleTimeString()}
+        <div className="flex-1">
+          <div className="font-medium">{isUser ? 'You' : 'Assistant'}</div>
+          <div className="mt-1">
+            <div className="text-gray-700 whitespace-pre-wrap">
+              {message.content}
+            </div>
+            {message.files && message.files.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {message.files.map((file: FileAttachment) => (
+                  <div
+                    key={file.name}
+                    className="flex items-center space-x-2 text-sm text-gray-600 bg-gray-50 rounded p-2"
+                  >
+                    <Paperclip size={14} />
+                    <span>{file.name}</span>
+                    <span className="text-gray-400">
+                      {new Date(file.uploadedAt).toLocaleTimeString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="text-xs text-gray-400 self-end ml-2">
+          {new Date(message.timestamp).toLocaleTimeString()}
+        </div>
       </div>
     </div>
   );
