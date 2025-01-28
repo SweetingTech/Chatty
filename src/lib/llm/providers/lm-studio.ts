@@ -173,21 +173,36 @@ class LMStudioProvider implements LLMProvider {
         throw new Error(`Chat API call failed. HTTP ${response.status}: ${errorDetails}`);
       }
 
-      const result = await response.json();
-      console.log('LM Studio chat response:', result);
+      try {
+        const result = await response.json();
+        console.log('LM Studio chat response:', result);
+        console.log('(Debug) result type:', typeof result);
 
-      // Cache response if session ID is set
-      if (this.currentSessionId) {
-        await chromadb.cacheResponse(
-          this.currentSessionId,
-          JSON.stringify(messages),
-          JSON.stringify(result),
-          config?.tools,
-          config?.mcp
-        );
+        // Cache response if session ID is set
+        if (this.currentSessionId) {
+          await chromadb.cacheResponse(
+            this.currentSessionId,
+            JSON.stringify(messages),
+            JSON.stringify(result),
+            config?.tools,
+            config?.mcp
+          );
+        }
+
+        if (!result.id || !result.model || !result.content) {
+          throw new Error('Invalid response format from LM Studio API');
+        }
+
+        return {
+          id: result.id,
+          model: result.model,
+          content: result.content,
+          finish_reason: result.finish_reason || 'stop',
+          usage: result.usage || undefined
+        };
+      } catch (error) {
+        throw new Error(`Failed to parse LM Studio response: ${error}`);
       }
-
-      return result;
     } catch (error) {
       console.error('LM Studio chat completion failed:', error);
       throw error;

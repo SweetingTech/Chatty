@@ -1,5 +1,8 @@
 import { execSync } from 'child_process';
 import findProcess from 'find-process';
+import consoleStamp from 'console-stamp';
+
+consoleStamp(console, { pattern: 'yyyy-mm-dd HH:MM:ss.l' });
 
 async function killProcesses() {
   // Only kill Vite processes, leave ChromaDB running

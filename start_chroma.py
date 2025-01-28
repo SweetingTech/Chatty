@@ -156,6 +156,14 @@ CHROMA_HOST = os.getenv('CHROMA_HOST', 'localhost')
 CHROMA_PORT = int(os.getenv('CHROMA_PORT', '8001'))
 COLLECTION_NAME = os.getenv('CHROMA_COLLECTION_NAME', 'chat_sessions')
 
+# LM Studio Configuration
+LM_STUDIO_HOST = os.getenv('LM_STUDIO_HOST', 'localhost')
+LM_STUDIO_PORT = int(os.getenv('LM_STUDIO_PORT', '1234'))
+
+# Initialize LLM clients (disabled for now since we only need ChromaDB)
+openai_client = None
+anthropic_client = None
+
 def kill_process_on_port(port: int):
     for proc in psutil.process_iter(['pid', 'name']):
         try:
@@ -401,23 +409,41 @@ async def save_session(session_id: str, request: Request):
         client_id = request.headers.get("X-Client-ID", "unknown")
         browser_id = request.headers.get("X-Browser-ID", "unknown")
         
+        print(f"Debug - Saving session {session_id} for client {client_id}, browser {browser_id}")
+        
         # Parse request body
         body = await request.json()
         messages = body if isinstance(body, list) else [body]
         
+        print(f"Debug - Received {len(messages)} messages")
+        
         # Validate messages
         for msg in messages:
             if not all(key in msg for key in ["id", "role", "content", "timestamp"]):
+                print(f"Debug - Invalid message format: {msg}")
                 raise HTTPException(status_code=422, detail="Invalid message format")
             
             # Ensure timestamps are integers
             msg["timestamp"] = int(msg["timestamp"])
         
-        collection = client.get_collection('chat_sessions')
+        # First verify the collection exists
+        try:
+            collection = client.get_collection('chat_sessions')
+            print("Debug - Successfully got chat_sessions collection")
+        except ValueError as e:
+            print(f"Debug - Collection error: {str(e)}")
+            # Create collection if it doesn't exist
+            collection = client.create_collection(
+                name='chat_sessions',
+                metadata={"description": "Stores chat session history"}
+            )
+            print("Debug - Created new chat_sessions collection")
+        
         current_time = int(time.time() * 1000)
         
         try:
             # Get existing session with full metadata
+            print(f"Debug - Checking for existing session {session_id}")
             existing = collection.get(
                 ids=[session_id],
                 include=['documents', 'metadatas']
@@ -434,6 +460,7 @@ async def save_session(session_id: str, request: Request):
             
             if existing['metadatas']:
                 try:
+                    print(f"Debug - Found existing session, merging messages")
                     existing_messages = json.loads(existing['documents'][0])
                     existing_metadata = existing['metadatas'][0]
                     
@@ -452,7 +479,7 @@ async def save_session(session_id: str, request: Request):
                         "clients": list(set([client_id] + existing_metadata.get("clients", [])))
                     })
                 except Exception as e:
-                    print(f"Error merging messages: {str(e)}")
+                    print(f"Debug - Error merging messages: {str(e)}")
             
             # Sort messages by timestamp
             messages.sort(key=lambda x: x['timestamp'])
@@ -464,6 +491,8 @@ async def save_session(session_id: str, request: Request):
                     "message_count": len(messages)
                 })
             
+            print(f"Debug - Saving {len(messages)} messages to session {session_id}")
+            
             # Update the session atomically
             collection.delete(ids=[session_id])
             collection.add(
@@ -472,19 +501,21 @@ async def save_session(session_id: str, request: Request):
                 documents=[json.dumps(messages)]
             )
             
+            print(f"Debug - Successfully saved session {session_id}")
+            
             return {
                 "status": "ok",
                 "message": "Session saved",
                 "metadata": metadata
             }
         except Exception as e:
-            print(f"Error adding session: {str(e)}")
-            print(f"Request body: {messages}")
-            print(f"Traceback: {traceback.format_exc()}")
+            print(f"Debug - Error adding session: {str(e)}")
+            print(f"Debug - Request body: {messages}")
+            print(f"Debug - Traceback: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to save session: {str(e)}")
     except Exception as e:
-        print(f"Error in save_session: {str(e)}")
-        print(f"Traceback: {traceback.format_exc()}")
+        print(f"Debug - Top level error in save_session: {str(e)}")
+        print(f"Debug - Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/sessions/{session_id}")
@@ -494,18 +525,39 @@ async def get_session(session_id: str, request: Request):
         client_id = request.headers.get("X-Client-ID", "unknown")
         browser_id = request.headers.get("X-Browser-ID", "unknown")
         
-        collection = client.get_collection('chat_sessions')
+        print(f"Debug - Getting session {session_id} for client {client_id}, browser {browser_id}")
+        
+        # First verify the collection exists
+        try:
+            collection = client.get_collection('chat_sessions')
+            print("Debug - Successfully got chat_sessions collection")
+        except ValueError as e:
+            print(f"Debug - Collection error: {str(e)}")
+            # Create collection if it doesn't exist
+            collection = client.create_collection(
+                name='chat_sessions',
+                metadata={"description": "Stores chat session history"}
+            )
+            print("Debug - Created new chat_sessions collection")
+        
+        # Get session data
+        print(f"Debug - Fetching session data for {session_id}")
         result = collection.get(
             ids=[session_id],
             include=['documents', 'metadatas']
         )
+        print(f"Debug - Raw result: {result}")
         
-        if not result["documents"]:
+        if not result["documents"] or not result["documents"][0]:
+            print(f"Debug - No documents found for session {session_id}")
             raise HTTPException(status_code=404, detail="Session not found")
         
         try:
+            print(f"Debug - Parsing session document: {result['documents'][0][:100]}...")
             messages = json.loads(result["documents"][0])
-            metadata = result["metadatas"][0]
+            metadata = result["metadatas"][0] if result["metadatas"] else {}
+            
+            print(f"Debug - Found {len(messages)} messages")
             
             # Sort messages by timestamp
             messages.sort(key=lambda x: x['timestamp'])
@@ -519,6 +571,7 @@ async def get_session(session_id: str, request: Request):
             })
             
             # Update metadata in background
+            print(f"Debug - Updating metadata for session {session_id}")
             collection.update(
                 ids=[session_id],
                 metadatas=[metadata]
@@ -529,9 +582,11 @@ async def get_session(session_id: str, request: Request):
                 "metadata": metadata
             }
         except json.JSONDecodeError as e:
-            print(f"Error decoding session messages: {str(e)}")
-            raise HTTPException(status_code=500, detail="Invalid session data format")
+            print(f"Debug - JSON decode error: {str(e)}")
+            print(f"Debug - Problem document: {result['documents'][0][:100]}...")
+            raise HTTPException(status_code=500, detail=f"Invalid session data format: {str(e)}")
     except Exception as e:
+        print(f"Debug - Top level error in get_session: {str(e)}")
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(status_code=500, detail=str(e))
@@ -930,7 +985,8 @@ async def list_lmstudio_models():
     """List available LM Studio models."""
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get('http://localhost:1234/v1/models')
+            lm_studio_url = f'http://{LM_STUDIO_HOST}:{LM_STUDIO_PORT}/v1/models'
+            response = await client.get(lm_studio_url)
             if not response.is_success:
                 raise HTTPException(status_code=response.status_code, detail=response.text)
             data = response.json()
@@ -975,6 +1031,10 @@ async def list_lmstudio_models():
 async def call_lmstudio(request: LLMRequest):
     """Call LM Studio's local API."""
     try:
+        # Debug request
+        print("Debug - Request type:", type(request))
+        print("Debug - Request dict:", request.model_dump())
+
         # Create completion request
         # Convert messages to LM Studio format
         messages = []
@@ -1005,6 +1065,8 @@ async def call_lmstudio(request: LLMRequest):
         if request.response_format:
             completion_request["response_format"] = request.response_format
 
+        print("Debug - Completion request:", completion_request)
+
         # Make API call
         if request.stream:
             # Return streaming response
@@ -1014,55 +1076,127 @@ async def call_lmstudio(request: LLMRequest):
             )
         else:
             # Return regular response
+            lm_studio_url = f'http://{LM_STUDIO_HOST}:{LM_STUDIO_PORT}/v1/chat/completions'
+            print(f"Debug - Making request to: {lm_studio_url}")
+            
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    'http://localhost:1234/v1/chat/completions',
+                    lm_studio_url,
                     headers={"Content-Type": "application/json"},
                     json=completion_request
                 )
             
-            if not response.ok:
-                error = await response.text()
+            if response.status_code < 200 or response.status_code >= 300:
+                error = response.text
+                print(f"Debug - Error response: {error}")
                 raise HTTPException(status_code=response.status_code, detail=error)
             
-            result = await response.json()
-            return LLMResponse(
-                id=result.id,
-                model=result.model,
-                content=result.choices[0].message.content,
-                finish_reason=result.choices[0].finish_reason,
-                usage=result.usage if hasattr(result, "usage") else None
-            )
+            try:
+                # Get response text first
+                response_text = response.text
+                print("Debug - Raw response text:", response_text)
+                print("Debug - Response text type:", type(response_text))
+                
+                # Parse JSON
+                try:
+                    result = json.loads(response_text)
+                    print("Debug - Parsed result:", result)
+                    print("Debug - Result type:", type(result))
+                except json.JSONDecodeError as e:
+                    print(f"Debug - JSON decode error: {str(e)}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Failed to parse LM Studio response as JSON: {str(e)}"
+                    )
+
+                # Validate response structure
+                if not isinstance(result, dict):
+                    raise ValueError("Response is not a dictionary")
+                
+                if not result.get('choices'):
+                    raise ValueError("Missing 'choices' in response")
+                
+                if not isinstance(result['choices'], list):
+                    raise ValueError("'choices' is not a list")
+                
+                if not result['choices']:
+                    raise ValueError("'choices' is empty")
+                
+                if not isinstance(result['choices'][0], dict):
+                    raise ValueError("First choice is not a dictionary")
+                
+                if not result['choices'][0].get('message'):
+                    raise ValueError("Missing 'message' in first choice")
+                
+                if not isinstance(result['choices'][0]['message'], dict):
+                    raise ValueError("'message' is not a dictionary")
+                
+                if not result['choices'][0]['message'].get('content'):
+                    raise ValueError("Missing 'content' in message")
+
+                # Convert LM Studio response to our common format
+                return {
+                    "id": result.get('id', str(time.time())),
+                    "model": result.get('model', request.model or "local-model"),
+                    "content": result['choices'][0]['message']['content'],
+                    "finish_reason": result['choices'][0].get('finish_reason', 'stop'),
+                    "usage": result.get('usage')
+                }
+            except ValueError as e:
+                print(f"Debug - Validation error: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Invalid response format from LM Studio: {str(e)}"
+                )
+            except Exception as e:
+                print(f"Debug - Unexpected error: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error processing LM Studio response: {str(e)}"
+                )
     except Exception as e:
-        print(f"LM Studio error: {str(e)}")
+        print(f"Debug - Top level error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 async def stream_lmstudio_response(completion_request: dict):
     """Stream LM Studio chat completion responses."""
     try:
+        lm_studio_url = f'http://{LM_STUDIO_HOST}:{LM_STUDIO_PORT}/v1/chat/completions'
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                'http://localhost:1234/v1/chat/completions',
+            async with client.stream(
+                'POST',
+                lm_studio_url,
                 headers={"Content-Type": "application/json"},
-                json=completion_request
-            )
-        
-        if not response.ok:
-            error = await response.text()
-            raise HTTPException(status_code=response.status_code, detail=error)
-        
-        async for line in response.aiter_lines():
-            if line.startswith('data: '):
-                try:
-                    data = json.loads(line[6:])  # Skip 'data: ' prefix
-                    content = data.get('choices', [{}])[0].get('delta', {}).get('content')
-                    if content:
-                        yield content
-                except Exception as e:
-                    print(f"Failed to parse LM Studio chunk: {e}")
-                    continue
-        
-        yield "data: [DONE]\n\n"
+                json=completion_request,
+                timeout=60.0
+            ) as response:
+                if response.status_code < 200 or response.status_code >= 300:
+                    error = await response.aread()
+                    raise HTTPException(status_code=response.status_code, detail=error.decode())
+
+                async for line in response.aiter_lines():
+                    if line.startswith('data: '):
+                        try:
+                            data = json.loads(line[6:])  # Skip 'data: ' prefix
+                            if data == '[DONE]':
+                                yield 'data: [DONE]\n\n'
+                                continue
+
+                            # Extract content from the delta
+                            content = data.get('choices', [{}])[0].get('delta', {}).get('content')
+                            if content:
+                                yield f'data: {json.dumps({"content": content})}\n\n'
+                        except json.JSONDecodeError as e:
+                            print(f"Failed to parse streaming chunk: {e}")
+                            continue
+                        except Exception as e:
+                            print(f"Error processing streaming chunk: {e}")
+                            continue
+
     except Exception as e:
         print(f"LM Studio streaming error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

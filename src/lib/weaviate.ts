@@ -119,27 +119,53 @@ class WeaviateService {
     }
   }
 
+  private async retryOperation<T>(operation: () => Promise<T>, maxRetries = 3, delay = 1000): Promise<T> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        if (attempt === maxRetries) throw error;
+        console.log(`Attempt ${attempt} failed, retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    throw new Error('Operation failed after max retries');
+  }
+
   public async deleteDocumentsByChatId(chatId: string) {
     if (!this.client) throw new Error('Weaviate client not initialized');
 
     try {
-      // First get all documents with this chatId
-      const result = await this.client.graphql
-        .get()
-        .withClassName('Document')
-        .withFields('_additional { id }')
-        .withWhere({
-          path: ["metadata", "chatId"],
-          operator: "Equal",
-          valueString: chatId
-        })
-        .do();
+      // First get all documents with this chatId using the correct where filter structure
+      const result = await this.retryOperation(async () => {
+        const query = await this.client!.graphql
+          .get()
+          .withClassName('Document')
+          .withFields('_additional { id }')
+          .withWhere({
+            operator: 'Equal',
+            path: ['metadata', 'chatId'],
+            valueString: chatId
+          })
+          .do();
+        return query;
+      });
 
-      // Then delete each document
+      // Check if we got any documents back
       const documents = result.data.Get.Document;
-      for (const doc of documents) {
-        await this.deleteDocument(doc._additional.id);
+      if (!documents || documents.length === 0) {
+        console.log(`No documents found for chatId: ${chatId}`);
+        return;
       }
+
+      // Delete each document with retry logic
+      for (const doc of documents) {
+        await this.retryOperation(async () => {
+          await this.deleteDocument(doc._additional.id);
+        });
+      }
+
+      console.log(`Successfully deleted ${documents.length} documents for chatId: ${chatId}`);
     } catch (error) {
       console.error('Failed to delete documents by chatId:', error);
       throw error;
