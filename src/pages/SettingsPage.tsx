@@ -183,13 +183,25 @@ export function SettingsPage() {
                     {llmConfigs?.claude?.isDefault ? 'Default' : 'Set as Default'}
                   </button>
                 </div>
-                    <input
-                      type="password"
-                      value={llmConfigs?.claude?.apiKey || ''}
-                      onChange={(e) => handleUpdateApiKey('claude', e.target.value)}
-                      placeholder="Claude API Key"
-                      className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    />
+                <div className="space-y-2">
+                  <input
+                    type="password"
+                    value={llmConfigs?.claude?.apiKey || ''}
+                    onChange={(e) => handleUpdateApiKey('claude', e.target.value)}
+                    placeholder="Claude API Key"
+                    className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
+                  <select
+                    value={llmConfigs?.claude?.model || 'claude-3-5-sonnet-latest'}
+                    onChange={(e) => handleUpdateModel('claude', e.target.value)}
+                    className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  >
+                    <optgroup label="Claude 3.5">
+                      <option value="claude-3-5-sonnet-latest">Claude 3.5 Sonnet</option>
+                      <option value="claude-3-5-haiku-latest">Claude 3.5 Haiku</option>
+                    </optgroup>
+                  </select>
+                </div>
               </div>
 
               {/* LM Studio */}
@@ -260,13 +272,29 @@ export function SettingsPage() {
                     {llmConfigs?.deepseek?.isDefault ? 'Default' : 'Set as Default'}
                   </button>
                 </div>
-                    <input
-                      type="password"
-                      value={llmConfigs?.deepseek?.apiKey || ''}
-                      onChange={(e) => handleUpdateApiKey('deepseek', e.target.value)}
-                      placeholder="Deepseek API Key"
-                      className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    />
+                <div className="space-y-2">
+                  <input
+                    type="password"
+                    value={llmConfigs?.deepseek?.apiKey || ''}
+                    onChange={(e) => handleUpdateApiKey('deepseek', e.target.value)}
+                    placeholder="Deepseek API Key"
+                    className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
+                  <select
+                    value={llmConfigs?.deepseek?.model || 'deepseek-chat'}
+                    onChange={(e) => handleUpdateModel('deepseek', e.target.value)}
+                    className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  >
+                    <optgroup label="Coder Models">
+                      <option value="deepseek-coder-33b-instruct">Deepseek Coder 33B</option>
+                      <option value="deepseek-coder-6.7b-instruct">Deepseek Coder 6.7B</option>
+                    </optgroup>
+                    <optgroup label="Chat Models">
+                      <option value="deepseek-chat">Deepseek Chat</option>
+                      <option value="deepseek-chat-medium">Deepseek Chat Medium</option>
+                    </optgroup>
+                  </select>
+                </div>
               </div>
             </div>
           </div>

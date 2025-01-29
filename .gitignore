@@ -52,10 +52,25 @@ lerna-debug.log*
 # Local Netlify folder
 .netlify
 
-# Database files
+# Database files and data
 *.sqlite
 *.sqlite3
+chroma_data/
+chroma_backup/
 
 # Misc
 .DS_Store
 Thumbs.db
+
+# ChromaDB specific
+.chroma/
+index_data/
+
+# Generated files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local development
+.history/
+.vite/

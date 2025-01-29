@@ -17,40 +17,18 @@ export function AgentForm({ agent, availableTools, onSubmit, onCancel }: AgentFo
   const [llmProvider, setLLMProvider] = useState<ProviderType>(agent?.llmConfig.provider || 'none');
   const [model, setModel] = useState(agent?.llmConfig.model || '');
 
-  // Get available models for the selected provider
+  // Get available models from llmConfigs
   const getModelsForProvider = (provider: ProviderType): string[] => {
-    switch (provider) {
-      case 'openai':
-        return [
-          'gpt-3.5-turbo-0125',
-          'gpt-4-turbo-preview',
-          'gpt-4'
-        ];
-      case 'claude':
-        return [
-          'claude-3-opus-20240229',
-          'claude-3-sonnet-20240229',
-          'claude-3-haiku-20240307'
-        ];
-      case 'deepseek':
-        return [
-          'deepseek-coder-33b-instruct',
-          'deepseek-coder-6.7b-instruct',
-          'deepseek-chat',
-          'deepseek-chat-medium'
-        ];
-      default:
-        return [];
-    }
+    return llmConfigs[provider]?.availableModels || [];
   };
 
-  // Update model when provider changes
+  // Update model when provider changes or when llmConfigs changes
   useEffect(() => {
     const models = getModelsForProvider(llmProvider);
     if (models.length > 0 && !models.includes(model)) {
       setModel(models[0]);
     }
-  }, [llmProvider]);
+  }, [llmProvider, llmConfigs]);
   const [temperature, setTemperature] = useState(agent?.llmConfig.temperature?.toString() || '0.7');
   const [maxTokens, setMaxTokens] = useState(agent?.llmConfig.maxTokens?.toString() || '4096');
   const [type, setType] = useState(agent?.type || 'custom');
@@ -144,7 +122,7 @@ export function AgentForm({ agent, availableTools, onSubmit, onCancel }: AgentFo
         >
           <option value="none">None</option>
           {Object.entries(llmConfigs)
-            .filter(([key]) => key !== 'lm-studio' && key !== 'none')
+            .filter(([key, config]) => config.enabled && key !== 'lm-studio' && key !== 'none')
             .map(([key, config]) => (
               <option key={key} value={key}>
                 {key === 'openai' ? 'OpenAI' :

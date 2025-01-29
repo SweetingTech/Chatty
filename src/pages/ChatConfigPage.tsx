@@ -1,15 +1,26 @@
-import React, { useState } from 'react';
+//Updated by: D
+import React from 'react';
 import { useAppStore } from '../store';
 import type { Agent } from '../types';
-import { AgentForm } from '../components/AgentForm';
+import { ChatAgentForm } from '../components/ChatAgentForm';
 import { SaveButton } from '../components/SaveButton';
 
 export function ChatConfigPage() {
-  const { agents, tools, updateDraftAgent, saveDraftAgent, hasDraftAgent } = useAppStore();
+  const { 
+    agents, 
+    updateDraftAgent, 
+    saveDraftAgent, 
+    hasDraftAgent,
+    setDefaultProvider 
+  } = useAppStore();
   const chatAgent = agents.find(a => a.type === 'chat');
 
   const handleUpdateChatAgent = (agentData: Omit<Agent, 'id'>) => {
     if (chatAgent) {
+      // When provider changes, update default provider in settings
+      if (agentData.llmConfig.provider !== chatAgent.llmConfig.provider) {
+        setDefaultProvider(agentData.llmConfig.provider);
+      }
       updateDraftAgent(chatAgent.id, agentData);
     }
   };
@@ -33,20 +44,18 @@ export function ChatConfigPage() {
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-gray-900">Chat Agent Configuration</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Customize the behavior and personality of your chat agent
+            Customize your chat agent's name, personality, and language model
           </p>
         </div>
 
         <div className="bg-white rounded-lg shadow-sm p-6">
-          <AgentForm
+          <ChatAgentForm
             agent={chatAgent}
-            availableTools={tools}
             onSubmit={handleUpdateChatAgent}
-            onCancel={() => {}}
           />
           <div className="mt-6">
             <SaveButton 
-              onSave={() => chatAgent && saveDraftAgent(chatAgent.id)}
+              onSave={async () => chatAgent && await saveDraftAgent(chatAgent.id)}
               hasChanges={chatAgent ? hasDraftAgent(chatAgent.id) : false}
             />
           </div>
