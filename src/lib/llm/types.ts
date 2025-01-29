@@ -117,7 +117,7 @@ export interface LMStudioConfig extends LLMConfig {
   isDefault?: boolean;
   baseUrl?: string;
   host?: string;
-  port?: string | number;
+  port?: string;
   onModelUpdate?: (modelId: string) => void;
 }
 

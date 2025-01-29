@@ -36,9 +36,14 @@ class LMStudioProvider implements LLMProvider {
   private currentModel: string = '';
   private currentSessionId: string | null = null;
   private onModelUpdate?: (modelId: string) => void;
+  private fastApiUrl = 'http://localhost:8001';
+  private lmStudioHost: string;
+  private lmStudioPort: string;
 
   constructor(config: LMStudioConfig) {
     this.onModelUpdate = config.onModelUpdate;
+    this.lmStudioHost = config.host || 'localhost';
+    this.lmStudioPort = config.port || '1234';
   }
 
   private getModelConfig(model: string | undefined): ModelConfig {
@@ -54,24 +59,30 @@ class LMStudioProvider implements LLMProvider {
 
   public async initialize(): Promise<void> {
     try {
-      // Fetch available models from FastAPI
-      const response = await fetch('http://localhost:8001/lmstudio/models');
-      if (response.status < 200 || response.status >= 300) {
+      // Fetch available models through FastAPI
+      const response = await fetch(`${this.fastApiUrl}/llm/lm-studio/models`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          host: this.lmStudioHost,
+          port: this.lmStudioPort
+        })
+      });
+      if (!response.ok) {
         const errorDetails = await response.text();
         throw new Error(`Failed to fetch models. HTTP ${response.status}: ${errorDetails}`);
       }
 
       const data = await response.json();
       console.log('Raw LM Studio models response:', data);
-      if (!data.models || !Array.isArray(data.models)) {
-        throw new Error('Invalid response format from LM Studio API');
-      }
-
+      
       // Clear existing configs
       this.modelConfigs = {};
       
       // Update our models list with models from the API
-      const apiModels = data.models.map((model: any) => model.id);
+      const apiModels = data.data.map((model: any) => model.id);
       console.log('Available LM Studio models:', apiModels);
 
       for (const modelId of apiModels) {
@@ -129,19 +140,6 @@ class LMStudioProvider implements LLMProvider {
     const model = config?.model || this.currentModel || this.models[0];
     const modelConfig = this.getModelConfig(model);
 
-    // Check cache if session ID is set
-    if (this.currentSessionId) {
-      const cachedResponse = await chromadb.getCachedResponse(
-        this.currentSessionId,
-        JSON.stringify(messages),
-        config?.tools,
-        config?.mcp
-      );
-      if (cachedResponse) {
-        return JSON.parse(cachedResponse);
-      }
-    }
-
     try {
       const requestPayload = {
         messages: messages.map(msg => ({
@@ -154,13 +152,18 @@ class LMStudioProvider implements LLMProvider {
         max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
         tools: config?.tools,
         tool_choice: config?.tool_choice,
-        response_format: modelConfig.supportsJson && config?.response_format ? config.response_format : undefined
+        response_format: modelConfig.supportsJson && config?.response_format ? config.response_format : undefined,
+        // Add connection details
+        lmStudio: {
+          host: this.lmStudioHost,
+          port: this.lmStudioPort
+        }
       };
 
       console.log('LM Studio chat request payload:', requestPayload);
 
-      // Call FastAPI endpoint
-      const response = await fetch('http://localhost:8001/llm/lmstudio', {
+      // Call FastAPI endpoint with LM Studio connection details
+      const response = await fetch(`${this.fastApiUrl}/llm/lm-studio`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -168,41 +171,25 @@ class LMStudioProvider implements LLMProvider {
         body: JSON.stringify(requestPayload),
       });
 
-      if (response.status < 200 || response.status >= 300) {
+      if (!response.ok) {
         const errorDetails = await response.text();
         throw new Error(`Chat API call failed. HTTP ${response.status}: ${errorDetails}`);
       }
 
-      try {
-        const result = await response.json();
-        console.log('LM Studio chat response:', result);
-        console.log('(Debug) result type:', typeof result);
+      const result = await response.json();
+      console.log('LM Studio chat response:', result);
 
-        // Cache response if session ID is set
-        if (this.currentSessionId) {
-          await chromadb.cacheResponse(
-            this.currentSessionId,
-            JSON.stringify(messages),
-            JSON.stringify(result),
-            config?.tools,
-            config?.mcp
-          );
-        }
-
-        if (!result.id || !result.model || !result.content) {
-          throw new Error('Invalid response format from LM Studio API');
-        }
-
-        return {
-          id: result.id,
-          model: result.model,
-          content: result.content,
-          finish_reason: result.finish_reason || 'stop',
-          usage: result.usage || undefined
-        };
-      } catch (error) {
-        throw new Error(`Failed to parse LM Studio response: ${error}`);
+      if (!result.choices?.[0]?.message?.content) {
+        throw new Error('Invalid response format from LM Studio API');
       }
+
+      return {
+        id: result.id,
+        model: result.model,
+        content: result.choices[0].message.content,
+        finish_reason: result.choices[0].finish_reason || 'stop',
+        usage: result.usage || undefined
+      };
     } catch (error) {
       console.error('LM Studio chat completion failed:', error);
       throw error;
@@ -218,8 +205,8 @@ class LMStudioProvider implements LLMProvider {
     const modelConfig = this.getModelConfig(model);
 
     try {
-      // Call FastAPI streaming endpoint
-      const response = await fetch('http://localhost:8001/llm/lmstudio', {
+      // Call FastAPI streaming endpoint with LM Studio connection details
+      const response = await fetch(`${this.fastApiUrl}/llm/lm-studio`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -236,11 +223,16 @@ class LMStudioProvider implements LLMProvider {
           tools: config?.tools,
           tool_choice: config?.tool_choice,
           response_format: modelConfig.supportsJson && config?.response_format ? config.response_format : undefined,
-          stream: true
+          stream: true,
+          // Add connection details
+          lmStudio: {
+            host: this.lmStudioHost,
+            port: this.lmStudioPort
+          }
         }),
       });
 
-      if (response.status < 200 || response.status >= 300) {
+      if (!response.ok) {
         const errorDetails = await response.text();
         throw new Error(`Stream chat API call failed. HTTP ${response.status}: ${errorDetails}`);
       }
@@ -272,7 +264,7 @@ class LMStudioProvider implements LLMProvider {
 
             try {
               const parsed = JSON.parse(data);
-              const text = parsed.choices[0]?.delta?.content || '';
+              const text = parsed.choices?.[0]?.delta?.content || '';
               if (text) {
                 content += text;
                 callbacks.onChunk(text);
@@ -282,24 +274,6 @@ class LMStudioProvider implements LLMProvider {
             }
           }
         }
-      }
-
-      // Cache the complete response if session ID is set
-      if (this.currentSessionId) {
-        const result: LLMResponse = {
-          id: Date.now().toString(),
-          model,
-          content,
-          finish_reason: 'stop'
-        };
-
-        await chromadb.cacheResponse(
-          this.currentSessionId,
-          JSON.stringify(messages),
-          JSON.stringify(result),
-          config?.tools,
-          config?.mcp
-        );
       }
 
       callbacks.onDone();

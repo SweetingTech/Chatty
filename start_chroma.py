@@ -21,6 +21,8 @@ from openai import OpenAI
 import anthropic
 from anthropic import Anthropic
 
+import hashlib  # For generating cache keys
+
 # Model configurations
 class ModelCapabilities(BaseModel):
     contextWindow: int
@@ -100,6 +102,15 @@ CHROMA_HOST = os.getenv('CHROMA_HOST', 'localhost')
 CHROMA_PORT = int(os.getenv('CHROMA_PORT', '8001'))
 COLLECTION_NAME = os.getenv('CHROMA_COLLECTION_NAME', 'chat_sessions')
 
+# Provider configurations
+LMSTUDIO_HOST = os.getenv('LMSTUDIO_HOST', 'localhost')
+LMSTUDIO_PORT = int(os.getenv('LMSTUDIO_PORT', '1234'))
+LMSTUDIO_BASE_URL = f"http://{LMSTUDIO_HOST}:{LMSTUDIO_PORT}"
+
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+CLAUDE_API_KEY = os.getenv('CLAUDE_API_KEY')
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+
 # Initialize FastAPI app
 app = FastAPI()
 
@@ -115,7 +126,7 @@ app.add_middleware(
     max_age=86400
 )
 
-# Initialize ChromaDB client with v0.6.0 settings
+# Initialize ChromaDB client
 client = chromadb.PersistentClient(
     path="./chroma_data",
     settings=Settings(
@@ -125,7 +136,7 @@ client = chromadb.PersistentClient(
     )
 )
 
-# Default collections that should exist
+# Default collections
 DEFAULT_COLLECTIONS = [
     {
         'name': 'chat_sessions',
@@ -190,10 +201,9 @@ def ensure_collections(retries=5, delay=1):
                     else:
                         raise
 
-                # Collection exists or was created, now add initial data if needed
+                # Add initial data if needed
                 if collection and 'initial_data' in collection_info:
                     try:
-                        # Check if data already exists
                         existing = collection.get(ids=collection_info['initial_data']['ids'])
                         if not existing['ids']:
                             collection.add(**collection_info['initial_data'])
@@ -202,9 +212,7 @@ def ensure_collections(retries=5, delay=1):
                             print(f"Initial data already exists in {collection_info['name']}")
                     except Exception as e:
                         print(f"Warning: Failed to add initial data to {collection_info['name']}: {str(e)}")
-                        # Continue even if initial data fails - the collection exists
 
-                # If we get here, collection is ready
                 break
 
             except Exception as e:
@@ -244,134 +252,223 @@ async def heartbeat_head():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/collections")
-async def list_collections():
-    """List all collection names (v0.6.x compatible)"""
-    try:
-        # In v0.6.0, list_collections() returns just the names
-        return client.list_collections()
-    except Exception as e:
-        print(f"Error listing collections: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+# -------------------------------------------------------------------------
+# Provider-specific endpoints
+# -------------------------------------------------------------------------
 
-@app.get("/collections/{collection_name}")
-async def get_collection(collection_name: str):
-    """Get collection details"""
-    try:
-        collection = client.get_collection(collection_name)
-        return {
-            "name": collection.name,
-            "metadata": collection.metadata
-        }
-    except ValueError:
-        raise HTTPException(status_code=404, detail=f"Collection {collection_name} not found")
-    except Exception as e:
-        print(f"Error getting collection: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/collections")
-async def create_collection(collection_data: CollectionModel):
-    """Create a new collection"""
-    try:
-        # Try to create collection directly
-        collection = client.create_collection(
-            name=collection_data.name,
-            metadata=collection_data.metadata
+async def forward_to_lm_studio(data: dict) -> dict:
+    """Forward request to LM Studio and return response"""
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{LMSTUDIO_BASE_URL}/v1/chat/completions",
+            json=data
         )
-        
-        return {
-            "name": collection.name,
-            "metadata": collection.metadata
-        }
-    except Exception as e:
-        # If collection already exists, that's fine
-        if "already exists" in str(e):
-            try:
-                collection = client.get_collection(collection_data.name)
-                return {
-                    "name": collection.name,
-                    "metadata": collection.metadata
-                }
-            except Exception as inner_e:
-                print(f"Error getting existing collection: {str(inner_e)}")
-                raise HTTPException(status_code=500, detail=str(inner_e))
-        
-        print(f"Error creating collection: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        response.raise_for_status()
+        return response.json()
 
-@app.get("/collections/{collection_name}/get")
-async def get_collection_documents(collection_name: str):
-    """Get documents from a collection"""
+async def forward_to_openai(data: dict) -> dict:
+    """Forward request to OpenAI API and return response"""
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    response = await client.chat.completions.create(**data)
+    return response
+
+async def forward_to_claude(data: dict) -> dict:
+    """Forward request to Claude API and return response"""
+    client = Anthropic(api_key=CLAUDE_API_KEY)
+    response = await client.messages.create(**data)
+    return response
+
+async def forward_to_deepseek(data: dict) -> dict:
+    """Forward request to Deepseek API and return response"""
+    headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}"}
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.deepseek.com/v1/chat/completions",
+            json=data,
+            headers=headers
+        )
+        response.raise_for_status()
+        return response.json()
+
+@app.get("/llm/{provider}/models")
+async def list_models(provider: str):
+    """Get available models for a provider"""
     try:
-        collection = client.get_collection(collection_name)
-        result = collection.get()
-        return {
-            "ids": result["ids"],
-            "documents": result["documents"],
-            "metadatas": result["metadatas"]
-        }
-    except ValueError:
-        raise HTTPException(status_code=404, detail=f"Collection {collection_name} not found")
+        if provider == "lm-studio":
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{LMSTUDIO_BASE_URL}/v1/models")
+                return response.json()
+        elif provider == "openai":
+            client = OpenAI(api_key=OPENAI_API_KEY)
+            models = client.models.list()
+            return {"models": [{"id": model.id} for model in models.data]}
+        elif provider == "claude":
+            return {
+                "models": [
+                    {"id": "claude-3-opus-20240229"},
+                    {"id": "claude-3-sonnet-20240229"},
+                    {"id": "claude-3-haiku-20240307"}
+                ]
+            }
+        elif provider == "deepseek":
+            return {
+                "models": [
+                    {"id": "deepseek-coder-33b-instruct"},
+                    {"id": "deepseek-coder-6.7b-instruct"},
+                    {"id": "deepseek-chat"},
+                    {"id": "deepseek-chat-medium"}
+                ]
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Invalid provider")
     except Exception as e:
-        print(f"Error getting documents: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/collections/{collection_name}/add")
-async def add_documents(collection_name: str, request: Request):
-    """Add documents to a collection"""
+@app.post("/llm/lm-studio/models")
+async def list_lm_studio_models(request: Request):
+    """Get available models from LM Studio"""
     try:
         data = await request.json()
-        collection = client.get_collection(collection_name)
-        collection.add(
-            ids=data["ids"],
-            metadatas=data["metadatas"],
-            documents=data["documents"]
-        )
-        return {"status": "success"}
-    except ValueError:
-        raise HTTPException(status_code=404, detail=f"Collection {collection_name} not found")
+        host = data.get('host', 'localhost')
+        port = data.get('port', '1234')
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"http://{host}:{port}/v1/models")
+            if not response.ok:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"LM Studio API error: {response.text}"
+                )
+            return response.json()
     except Exception as e:
-        print(f"Error adding documents: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/collections/{collection_name}/delete")
-async def delete_documents(collection_name: str, request: Request):
-    """Delete documents from a collection"""
+@app.post("/llm/{provider}")
+async def provider_chat(provider: str, request: Request):
+    """Handle chat requests for any provider"""
     try:
         data = await request.json()
-        collection = client.get_collection(collection_name)
-        collection.delete(ids=data["ids"])
-        return {"status": "success"}
-    except ValueError:
-        raise HTTPException(status_code=404, detail=f"Collection {collection_name} not found")
-    except Exception as e:
-        print(f"Error deleting documents: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        stream = data.get('stream', False)
+        
+        # If streaming is requested, handle differently
+        if stream:
+            return StreamingResponse(
+                stream_provider_chat(provider, data),
+                media_type='text/event-stream'
+            )
+        
+        # Check cache for non-streaming requests
+        messages_json = json.dumps(data, sort_keys=True)
+        cached = get_cached_response(messages_json)
+        if cached:
+            return json.loads(cached)
+        
+        # Forward to appropriate provider
+        if provider == "lm-studio":
+            # Extract LM Studio connection details
+            lm_studio = data.pop('lmStudio', {})
+            host = lm_studio.get('host', 'localhost')
+            port = lm_studio.get('port', '1234')
+            
+            # Forward to LM Studio
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"http://{host}:{port}/v1/chat/completions",
+                    json=data
+                )
+                if not response.ok:
+                    raise HTTPException(
+                        status_code=response.status_code,
+                        detail=f"LM Studio API error: {response.text}"
+                    )
+                result = response.json()
+        elif provider == "openai":
+            result = await forward_to_openai(data)
+        elif provider == "claude":
+            result = await forward_to_claude(data)
+        elif provider == "deepseek":
+            result = await forward_to_deepseek(data)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid provider")
+        
+        # Cache response
+        store_cached_response(messages_json, json.dumps(result))
+        
+        return result
 
-@app.delete("/collections/{collection_name}")
-async def delete_collection(collection_name: str):
-    """Delete a collection"""
+async def stream_provider_chat(provider: str, data: dict):
+    """Handle streaming chat requests for any provider"""
     try:
-        client.delete_collection(collection_name)
-        return {"status": "success"}
-    except ValueError:
-        raise HTTPException(status_code=404, detail=f"Collection {collection_name} not found")
+        if provider == "lm-studio":
+            # Extract LM Studio connection details
+            lm_studio = data.pop('lmStudio', {})
+            host = lm_studio.get('host', 'localhost')
+            port = lm_studio.get('port', '1234')
+            
+            # Forward to LM Studio with streaming
+            async with httpx.AsyncClient() as client:
+                async with client.stream(
+                    'POST',
+                    f"http://{host}:{port}/v1/chat/completions",
+                    json=data
+                ) as response:
+                    if not response.ok:
+                        error_text = await response.text()
+                        raise HTTPException(
+                            status_code=response.status_code,
+                            detail=f"LM Studio API error: {error_text}"
+                        )
+                    
+                    async for line in response.aiter_lines():
+                        if line.startswith('data: '):
+                            yield line + '\n'
+        else:
+            raise HTTPException(status_code=400, detail="Streaming not supported for this provider")
+    except HTTPException as e:
+        yield f"data: {json.dumps({'error': str(e.detail)})}\n\n"
     except Exception as e:
-        print(f"Error deleting collection: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
-# Session Management Endpoints
+# -------------------------------------------------------------------------
+# Caching functions
+# -------------------------------------------------------------------------
+
+def generate_cache_key(messages_json: str) -> str:
+    """Generate a stable hash from messages JSON"""
+    return hashlib.md5(messages_json.encode('utf-8')).hexdigest()
+
+def get_cached_response(messages_json: str) -> Optional[str]:
+    """Get cached response if it exists"""
+    cache_id = f"cache-{generate_cache_key(messages_json)}"
+    collection = client.get_collection('chat_sessions')
+    result = collection.get(ids=[cache_id])
+    if result and result['ids']:
+        return result['documents'][0]
+    return None
+
+def store_cached_response(messages_json: str, response_str: str):
+    """Store response in cache"""
+    cache_id = f"cache-{generate_cache_key(messages_json)}"
+    collection = client.get_collection('chat_sessions')
+    collection.delete(ids=[cache_id])
+    collection.add(
+        ids=[cache_id],
+        documents=[response_str],
+        metadatas=[{
+            'timestamp': int(time.time() * 1000),
+            'type': 'chat_cache'
+        }]
+    )
+
+# -------------------------------------------------------------------------
+# Session Management
+# -------------------------------------------------------------------------
 
 @app.get("/sessions")
 async def get_sessions():
     """Get all chat sessions"""
     try:
-        try:
-            collection = client.get_collection('chat_sessions')
-        except ValueError:
-            # Return empty list if collection doesn't exist
-            return []
-            
+        collection = client.get_collection('chat_sessions')
         result = collection.get()
         sessions = []
         for i, doc in enumerate(result['documents']):
@@ -387,9 +484,10 @@ async def get_sessions():
                 print(f"Error parsing session document: {e}")
                 continue
         return sessions
+    except ValueError:
+        return []
     except Exception as e:
         print(f"Error getting sessions: {str(e)}")
-        # Return empty list for any error to avoid frontend issues
         return []
 
 @app.get("/sessions/{session_id}")
@@ -433,7 +531,7 @@ async def create_session(request: Request):
         try:
             collection.delete(ids=[session_id])
         except Exception:
-            pass  # Ignore if session doesn't exist
+            pass  # ignore if session doesn't exist
             
         # Add new session
         collection.add(
@@ -466,11 +564,14 @@ async def delete_session(session_id: str):
         print(f"Error deleting session: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# -------------------------------------------------------------------------
+# MAIN
+# -------------------------------------------------------------------------
 if __name__ == "__main__":
     print(f"Starting ChromaDB server on {CHROMA_HOST}:{CHROMA_PORT}...")
     print(f"Using collection: {COLLECTION_NAME}")
-    
-    # Check if port is already in use
+    print(f"LM Studio URL: {LMSTUDIO_BASE_URL}")
+
     if is_port_in_use(CHROMA_PORT):
         print(f"Port {CHROMA_PORT} is already in use. Attempting to kill existing process...")
         if kill_process_on_port(CHROMA_PORT):
