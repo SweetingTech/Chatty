@@ -8,11 +8,13 @@ A powerful and flexible application for managing and interacting with multiple L
 
 - 🤖 **Multi-Model Support**: Seamlessly integrate with various LLM providers:
   - Local models via LM Studio
-  - OpenAI models
-  - Anthropic's Claude
+  - OpenAI models (GPT-3.5, GPT-4)
+  - Anthropic's Claude (Sonnet, Haiku)
+  - Deepseek models (Chat, Coder)
   - Custom model implementations
 
 - 💬 **Advanced Chat Interface**:
+  - Personalized chat agent with customizable name and personality
   - Multi-session management
   - Context-aware conversations
   - File attachments support
@@ -115,11 +117,34 @@ Note: If you encounter any issues during installation, you can run individual co
 ### Configuration
 
 1. Navigate to the Settings page
-2. Configure at least one of the following:
+2. Configure your LLM providers:
    - LM Studio URL (for local models)
-   - OpenAI API key
-   - Claude API key
-3. Optional: Set up Weaviate for document embeddings
+   - OpenAI API key and model selection
+   - Claude API key and model selection (Sonnet/Haiku)
+   - Deepseek API key and model selection (Chat/Coder)
+3. Set your default provider for the chat agent
+4. Optional: Set up Weaviate for document embeddings
+
+### Chat Agent Configuration
+
+The chat agent can be customized through the Chat Configuration page:
+
+1. **Name**: Set a custom name that the agent will respond to
+2. **Personality**:
+   - Traits: Define characteristics (e.g., friendly, professional)
+   - Tone: Choose from professional, casual, friendly, or formal
+   - Style: Select concise, detailed, technical, or simple
+   - Constraints: Add specific behavioral rules
+
+3. **Language Model**:
+   - Provider: Use the default from settings or choose another
+   - Model: Select from available models for the chosen provider
+   - Parameters: Adjust temperature and max tokens
+
+The chat agent's configuration syncs with your settings:
+- The default provider from settings is automatically selected
+- Changing the provider in chat config updates the default in settings
+- Only enabled providers from settings are available
 
 ## Architecture
 
@@ -186,6 +211,16 @@ npm run test
 3. Commit your changes
 4. Push to the branch
 5. Create a Pull Request
+
+### Git Configuration
+
+The repository includes comprehensive `.gitignore` settings for:
+- Database files and data (chroma_data/, chroma_backup/)
+- Python-specific files (__pycache__/, *.pyc)
+- Development and build files (dist/, build/)
+- Environment and configuration files (.env)
+- Local development files (.vite/, .cache/)
+- System and temporary files
 
 ## License
 
