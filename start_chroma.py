@@ -1,3 +1,5 @@
+# main.py
+
 import chromadb
 from chromadb.config import Settings
 import uvicorn
@@ -7,6 +9,7 @@ from typing import List, Dict, Optional, Union
 import json
 import time
 import httpx
+import requests
 import os
 import traceback
 from dotenv import load_dotenv
@@ -23,7 +26,12 @@ from anthropic import Anthropic
 
 import hashlib  # For generating cache keys
 
+# Custom timeout configuration
+TIMEOUT = httpx.Timeout(60.0, connect=30.0)  # 60s for read, 30s for connect
+
+# -------------------------------------------------------------------------
 # Model configurations
+# -------------------------------------------------------------------------
 class ModelCapabilities(BaseModel):
     contextWindow: int
     maxOutputTokens: int
@@ -73,6 +81,9 @@ class GetRequest(BaseModel):
     ids: Optional[List[str]] = None
     limit: Optional[int] = None
 
+# -------------------------------------------------------------------------
+# Utility functions for port management
+# -------------------------------------------------------------------------
 def is_port_in_use(port: int) -> bool:
     """Check if a port is in use."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -83,7 +94,7 @@ def is_port_in_use(port: int) -> bool:
             return True
 
 def kill_process_on_port(port: int) -> bool:
-    """Kill process using the specified port."""
+    """Kill the process using the specified port."""
     for proc in psutil.process_iter(['pid', 'name']):
         try:
             for conn in proc.connections('inet'):
@@ -94,10 +105,14 @@ def kill_process_on_port(port: int) -> bool:
             pass
     return False
 
-# Load environment variables
+# -------------------------------------------------------------------------
+# Environment and configuration
+# -------------------------------------------------------------------------
 load_dotenv()
 
-# Get configuration from environment
+# Schema version for collection management
+SCHEMA_VERSION = "1.0"
+
 CHROMA_HOST = os.getenv('CHROMA_HOST', 'localhost')
 CHROMA_PORT = int(os.getenv('CHROMA_PORT', '8001'))
 COLLECTION_NAME = os.getenv('CHROMA_COLLECTION_NAME', 'chat_sessions')
@@ -114,7 +129,9 @@ DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 # Initialize FastAPI app
 app = FastAPI()
 
-# Add CORS middleware
+# -------------------------------------------------------------------------
+# CORS Middleware
+# -------------------------------------------------------------------------
 ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '*')
 app.add_middleware(
     CORSMiddleware,
@@ -126,7 +143,9 @@ app.add_middleware(
     max_age=86400
 )
 
+# -------------------------------------------------------------------------
 # Initialize ChromaDB client
+# -------------------------------------------------------------------------
 client = chromadb.PersistentClient(
     path="./chroma_data",
     settings=Settings(
@@ -136,7 +155,9 @@ client = chromadb.PersistentClient(
     )
 )
 
+# -------------------------------------------------------------------------
 # Default collections
+# -------------------------------------------------------------------------
 DEFAULT_COLLECTIONS = [
     {
         'name': 'chat_sessions',
@@ -175,34 +196,67 @@ DEFAULT_COLLECTIONS = [
     }
 ]
 
-def ensure_collections(retries=5, delay=1):
-    """Create all required collections if they don't exist."""
+def ensure_collections(retries=10, delay=2):
+    """Initialize and verify collections while preserving existing data."""
     print("Initializing collections...")
     for collection_info in DEFAULT_COLLECTIONS:
-        collection = None
         for attempt in range(retries):
             try:
-                # Try to create collection directly
+                # Try to get or create collection
                 try:
+                    collection = client.get_collection(collection_info['name'])
+                    print(f"Found existing collection {collection_info['name']}")
+                    
+                    # Update metadata if needed while preserving existing values
+                    current_metadata = collection.metadata or {}
+                    needs_update = False
+                    
+                    # Add schema version if missing
+                    if 'schema_version' not in current_metadata:
+                        needs_update = True
+                        current_metadata['schema_version'] = SCHEMA_VERSION
+                        
+                    # Ensure required HNSW parameters exist
+                    if 'hnsw:space' not in current_metadata:
+                        needs_update = True
+                        current_metadata['hnsw:space'] = 'cosine'
+                    if 'hnsw:construction_ef' not in current_metadata:
+                        needs_update = True
+                        current_metadata['hnsw:construction_ef'] = 100
+                    if 'hnsw:search_ef' not in current_metadata:
+                        needs_update = True
+                        current_metadata['hnsw:search_ef'] = 50
+                        
+                    # Update description if changed
+                    if current_metadata.get('description') != collection_info['description']:
+                        needs_update = True
+                        current_metadata['description'] = collection_info['description']
+                        
+                    if needs_update:
+                        collection.modify(metadata=current_metadata)
+                        print(f"Updated metadata for {collection_info['name']}")
+                    else:
+                        print(f"Collection {collection_info['name']} metadata is up to date")
+                        
+                except Exception as e:
+                    if "does not exist" not in str(e):
+                        raise
+                    
+                    # Create new collection if it doesn't exist
                     collection = client.create_collection(
                         name=collection_info['name'],
                         metadata={
                             'description': collection_info['description'],
+                            'schema_version': SCHEMA_VERSION,
                             'hnsw:space': 'cosine',
                             'hnsw:construction_ef': 100,
                             'hnsw:search_ef': 50
                         }
                     )
-                    print(f"Created collection {collection_info['name']}")
-                except Exception as e:
-                    if "already exists" in str(e):
-                        collection = client.get_collection(collection_info['name'])
-                        print(f"Collection {collection_info['name']} already exists")
-                    else:
-                        raise
-
-                # Add initial data if needed
-                if collection and 'initial_data' in collection_info:
+                    print(f"Created new collection {collection_info['name']}")
+                
+                # Handle initial data
+                if 'initial_data' in collection_info:
                     try:
                         existing = collection.get(ids=collection_info['initial_data']['ids'])
                         if not existing['ids']:
@@ -211,10 +265,27 @@ def ensure_collections(retries=5, delay=1):
                         else:
                             print(f"Initial data already exists in {collection_info['name']}")
                     except Exception as e:
-                        print(f"Warning: Failed to add initial data to {collection_info['name']}: {str(e)}")
-
-                break
-
+                        print(f"Warning: Failed to verify initial data: {str(e)}")
+                        if attempt < retries - 1:
+                            print(f"Retrying in {delay} seconds...")
+                            time.sleep(delay)
+                            continue
+                
+                # Verify the collection exists and is accessible
+                try:
+                    test_collection = client.get_collection(collection_info['name'])
+                    if test_collection is None:
+                        raise Exception("Collection not accessible")
+                    print(f"Verified collection access for {collection_info['name']}")
+                    break
+                except Exception as e:
+                    print(f"Warning: Collection {collection_info['name']} not yet accessible: {str(e)}")
+                    if attempt < retries - 1:
+                        print(f"Retrying in {delay} seconds...")
+                        time.sleep(delay)
+                        continue
+                    raise
+                    
             except Exception as e:
                 if attempt == retries - 1:
                     print(f"Error ensuring collection {collection_info['name']} after {retries} attempts: {str(e)}")
@@ -222,6 +293,12 @@ def ensure_collections(retries=5, delay=1):
                 print(f"Attempt {attempt + 1} failed, retrying in {delay} seconds...")
                 time.sleep(delay)
 
+    print("All collections verified, waiting for HTTP API readiness...")
+    time.sleep(5)
+
+# -------------------------------------------------------------------------
+# FastAPI event handlers
+# -------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
     try:
@@ -232,6 +309,9 @@ async def startup_event():
         print(f"Failed to initialize ChromaDB: {str(e)}")
         print("Server will continue starting - collections will be created on demand")
 
+# -------------------------------------------------------------------------
+# Basic routes
+# -------------------------------------------------------------------------
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "ChromaDB server is running"}
@@ -252,51 +332,269 @@ async def heartbeat_head():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# -------------------------------------------------------------------------
-# Provider-specific endpoints
-# -------------------------------------------------------------------------
-
-async def forward_to_lm_studio(data: dict) -> dict:
-    """Forward request to LM Studio and return response"""
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{LMSTUDIO_BASE_URL}/v1/chat/completions",
-            json=data
+@app.get("/ready")
+async def ready_check():
+    """Health check endpoint that verifies all collections are ready."""
+    try:
+        for collection_info in DEFAULT_COLLECTIONS:
+            # Check if the collection exists and has correct schema version
+            collection = client.get_collection(collection_info['name'])
+            if collection is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Collection {collection_info['name']} not found"
+                )
+            
+            if collection.metadata.get('schema_version') != SCHEMA_VERSION:
+                # Don't fail, just warn
+                print(f"Warning: Collection {collection_info['name']} schema version mismatch")
+            
+            # Verify initial data if applicable
+            if 'initial_data' in collection_info:
+                data = collection.get(ids=collection_info['initial_data']['ids'])
+                if not data['ids']:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"Initial data missing in {collection_info['name']}"
+                    )
+        
+        return {
+            "status": "ready",
+            "schema_version": SCHEMA_VERSION,
+            "collections": [c['name'] for c in DEFAULT_COLLECTIONS]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"ChromaDB not fully initialized: {str(e)}"
         )
-        response.raise_for_status()
-        return response.json()
+
+@app.get("/collections")
+async def list_collections():
+    """v0.6.0+ compatible collection listing endpoint."""
+    try:
+        collections = client.list_collections()
+        # Handle both object and string formats
+        collection_list = []
+        for c in collections:
+            try:
+                if isinstance(c, str):
+                    collection_list.append({"name": c})
+                else:
+                    # Try to get name as attribute first
+                    name = getattr(c, 'name', None)
+                    if name is None:
+                        # If not an attribute, try as dict
+                        name = c.get('name', str(c))
+                    collection_list.append({"name": name})
+            except Exception as e:
+                print(f"Warning: Failed to process collection {c}: {str(e)}")
+                continue
+                
+        print(f"Found collections: {collection_list}")  # Debug log
+        return {
+            "collections": collection_list
+        }
+    except Exception as e:
+        print(f"Error in list_collections: {str(e)}")  # Debug log
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list collections: {str(e)}"
+        )
+
+@app.get("/collections/{name}")
+async def get_collection(name: str):
+    """Get collection details in v0.6.0+ format."""
+    try:
+        collection = client.get_collection(name)
+        if not collection:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Collection {name} not found"
+            )
+        return {
+            "name": collection.name,
+            "metadata": collection.metadata or {}
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get collection {name}: {str(e)}"
+        )
+
+@app.get("/collections/{name}/get")
+async def get_collection_data(name: str, ids: Optional[List[str]] = None):
+    """Get documents from a collection."""
+    try:
+        collection = client.get_collection(name)
+        if not collection:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Collection {name} not found"
+            )
+        
+        # Get documents with optional filtering by IDs
+        if ids:
+            result = collection.get(ids=ids)
+        else:
+            result = collection.get()
+            
+        return {
+            "ids": result['ids'],
+            "documents": result['documents'],
+            "metadatas": result['metadatas']
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get documents from collection {name}: {str(e)}"
+        )
+
+@app.post("/collections/{name}/add")
+async def add_to_collection(name: str, request: Request):
+    """Add documents to a collection."""
+    try:
+        data = await request.json()
+        collection = client.get_collection(name)
+        if not collection:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Collection {name} not found"
+            )
+            
+        collection.add(
+            ids=data['ids'],
+            documents=data['documents'],
+            metadatas=data.get('metadatas', [{}] * len(data['ids']))
+        )
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to add documents to collection {name}: {str(e)}"
+        )
+
+@app.post("/collections/{name}/delete")
+async def delete_from_collection(name: str, request: Request):
+    """Delete documents from a collection."""
+    try:
+        data = await request.json()
+        collection = client.get_collection(name)
+        if not collection:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Collection {name} not found"
+            )
+            
+        collection.delete(ids=data['ids'])
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete documents from collection {name}: {str(e)}"
+        )
+
+# -------------------------------------------------------------------------
+# Provider-specific API calls
+# -------------------------------------------------------------------------
+async def forward_to_lm_studio(data: dict) -> dict:
+    """Forward request to LM Studio and return response."""
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as http_client:
+            response = await http_client.post(
+                f"{LMSTUDIO_BASE_URL}/v1/chat/completions",
+                json=data
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.ReadTimeout:
+        raise HTTPException(
+            status_code=504,
+            detail="LM Studio timed out. The model may still be loading or generating a response. Please try again in a moment."
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to connect to LM Studio: {str(e)}"
+        )
 
 async def forward_to_openai(data: dict) -> dict:
-    """Forward request to OpenAI API and return response"""
+    """Forward request to OpenAI API and return response."""
     client = OpenAI(api_key=OPENAI_API_KEY)
     response = await client.chat.completions.create(**data)
     return response
 
 async def forward_to_claude(data: dict) -> dict:
-    """Forward request to Claude API and return response"""
-    client = Anthropic(api_key=CLAUDE_API_KEY)
-    response = await client.messages.create(**data)
-    return response
+    """Forward request to Claude API with proper transformation"""
+    try:
+        # Transform request data for Claude
+        claude_payload = ProviderRequestTransformer.prepare_claude_payload(data)
+        
+        # Make request to Claude
+        client = Anthropic(api_key=CLAUDE_API_KEY)
+        response = await client.completions.create(**claude_payload)
+        
+        # Transform response to standard format
+        return ProviderResponseTransformer.transform_claude(data.get('messages', []), response)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Claude API error: {str(e)}"
+        )
 
 async def forward_to_deepseek(data: dict) -> dict:
-    """Forward request to Deepseek API and return response"""
-    headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}"}
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "https://api.deepseek.com/v1/chat/completions",
-            json=data,
-            headers=headers
+    """Forward request to Deepseek API with proper transformation"""
+    try:
+        # Transform request data for Deepseek
+        deepseek_payload = ProviderRequestTransformer.prepare_deepseek_payload(data)
+        
+        # Make request to Deepseek
+        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}"}
+        async with httpx.AsyncClient(timeout=TIMEOUT) as http_client:
+            response = await http_client.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                json=deepseek_payload,
+                headers=headers
+            )
+            response.raise_for_status()
+            result = response.json()
+            
+            # Transform response to standard format
+            return ProviderResponseTransformer.transform_deepseek(result)
+    except httpx.ReadTimeout:
+        raise HTTPException(
+            status_code=504,
+            detail="Deepseek API request timed out. Please try again."
         )
-        response.raise_for_status()
-        return response.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=e.response.status_code if hasattr(e, 'response') else 500,
+            detail=f"Deepseek API error: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Deepseek API error: {str(e)}"
+        )
 
 @app.get("/llm/{provider}/models")
 async def list_models(provider: str):
-    """Get available models for a provider"""
+    """Get available models for a given provider."""
     try:
         if provider == "lm-studio":
-            async with httpx.AsyncClient() as client:
-                response = await client.get(f"{LMSTUDIO_BASE_URL}/v1/models")
+            async with httpx.AsyncClient(timeout=TIMEOUT) as http_client:
+                response = await http_client.get(f"{LMSTUDIO_BASE_URL}/v1/models")
+                response.raise_for_status()
                 return response.json()
         elif provider == "openai":
             client = OpenAI(api_key=OPENAI_API_KEY)
@@ -305,9 +603,8 @@ async def list_models(provider: str):
         elif provider == "claude":
             return {
                 "models": [
-                    {"id": "claude-3-opus-20240229"},
-                    {"id": "claude-3-sonnet-20240229"},
-                    {"id": "claude-3-haiku-20240307"}
+                    {"id": "claude-3-5-sonnet-latest"},
+                    {"id": "claude-3-5-haiku-latest"}
                 ]
             }
         elif provider == "deepseek":
@@ -320,32 +617,66 @@ async def list_models(provider: str):
                 ]
             }
         else:
-            raise HTTPException(status_code=400, detail="Invalid provider")
+            raise HTTPException(status_code=400, detail="Invalid provider.")
+    except httpx.ReadTimeout:
+        raise HTTPException(
+            status_code=504,
+            detail="Request to list models timed out. Please try again."
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+from src.lib.llm.providers.provider_utils import ProviderResponseTransformer, ProviderRequestTransformer
+
 @app.post("/llm/lm-studio/models")
 async def list_lm_studio_models(request: Request):
-    """Get available models from LM Studio"""
+    """Get available models from LM Studio with proper response handling."""
     try:
+        # 1. Extract and validate request data
         data = await request.json()
         host = data.get('host', 'localhost')
         port = data.get('port', '1234')
         
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"http://{host}:{port}/v1/models")
-            if not response.ok:
+        # 2. Make request to LM Studio
+        async with httpx.AsyncClient(timeout=TIMEOUT) as http_client:
+            try:
+                response = await http_client.get(f"http://{host}:{port}/v1/models")
+                response.raise_for_status()
+                
+                # 3. Transform response to expected format
+                models_data = response.json()
+                transformed_response = ProviderResponseTransformer.transform_lm_studio(models_data)
+                
+                return transformed_response
+                
+            except httpx.ReadTimeout:
                 raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"LM Studio API error: {response.text}"
+                    status_code=504,
+                    detail="LM Studio timed out while listing models. The server may still be initializing."
                 )
-            return response.json()
+            except httpx.RequestError as e:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Failed to connect to LM Studio: {str(e)}"
+                )
+                
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid request data: {str(e)}"
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
 
 @app.post("/llm/{provider}")
 async def provider_chat(provider: str, request: Request):
-    """Handle chat requests for any provider"""
+    """
+    Handle chat requests for any provider.
+    Non-streaming requests utilize caching by default.
+    """
     try:
         data = await request.json()
         stream = data.get('stream', False)
@@ -370,17 +701,12 @@ async def provider_chat(provider: str, request: Request):
             host = lm_studio.get('host', 'localhost')
             port = lm_studio.get('port', '1234')
             
-            # Forward to LM Studio
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
+            async with httpx.AsyncClient(timeout=TIMEOUT) as http_client:
+                response = await http_client.post(
                     f"http://{host}:{port}/v1/chat/completions",
                     json=data
                 )
-                if not response.ok:
-                    raise HTTPException(
-                        status_code=response.status_code,
-                        detail=f"LM Studio API error: {response.text}"
-                    )
+                response.raise_for_status()
                 result = response.json()
         elif provider == "openai":
             result = await forward_to_openai(data)
@@ -389,15 +715,26 @@ async def provider_chat(provider: str, request: Request):
         elif provider == "deepseek":
             result = await forward_to_deepseek(data)
         else:
-            raise HTTPException(status_code=400, detail="Invalid provider")
+            raise HTTPException(status_code=400, detail="Invalid provider.")
         
         # Cache response
         store_cached_response(messages_json, json.dumps(result))
         
         return result
+    except httpx.ReadTimeout:
+        raise HTTPException(
+            status_code=504,
+            detail="Request timed out. The model may still be loading or generating a response."
+        )
+    except Exception as e:
+        print(f"Error in provider_chat: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 async def stream_provider_chat(provider: str, data: dict):
-    """Handle streaming chat requests for any provider"""
+    """
+    Handle streaming chat requests for any provider.
+    Currently, LM Studio is implemented as an example.
+    """
     try:
         if provider == "lm-studio":
             # Extract LM Studio connection details
@@ -405,25 +742,23 @@ async def stream_provider_chat(provider: str, data: dict):
             host = lm_studio.get('host', 'localhost')
             port = lm_studio.get('port', '1234')
             
-            # Forward to LM Studio with streaming
-            async with httpx.AsyncClient() as client:
-                async with client.stream(
+            async with httpx.AsyncClient(timeout=TIMEOUT) as http_client:
+                async with http_client.stream(
                     'POST',
                     f"http://{host}:{port}/v1/chat/completions",
                     json=data
                 ) as response:
-                    if not response.ok:
-                        error_text = await response.text()
-                        raise HTTPException(
-                            status_code=response.status_code,
-                            detail=f"LM Studio API error: {error_text}"
-                        )
+                    response.raise_for_status()
                     
                     async for line in response.aiter_lines():
+                        # For SSE-like messages, lines often begin with "data: "
                         if line.startswith('data: '):
                             yield line + '\n'
         else:
-            raise HTTPException(status_code=400, detail="Streaming not supported for this provider")
+            # If needed, implement streaming for openai/claude/deepseek similarly.
+            raise HTTPException(status_code=400, detail="Streaming not supported for this provider.")
+    except httpx.ReadTimeout:
+        yield f"data: {json.dumps({'error': 'Stream timed out. The model may still be loading or generating.'})}\n\n"
     except HTTPException as e:
         yield f"data: {json.dumps({'error': str(e.detail)})}\n\n"
     except Exception as e:
@@ -432,13 +767,12 @@ async def stream_provider_chat(provider: str, data: dict):
 # -------------------------------------------------------------------------
 # Caching functions
 # -------------------------------------------------------------------------
-
 def generate_cache_key(messages_json: str) -> str:
-    """Generate a stable hash from messages JSON"""
+    """Generate a stable hash from messages JSON."""
     return hashlib.md5(messages_json.encode('utf-8')).hexdigest()
 
 def get_cached_response(messages_json: str) -> Optional[str]:
-    """Get cached response if it exists"""
+    """Get cached response if it exists."""
     cache_id = f"cache-{generate_cache_key(messages_json)}"
     collection = client.get_collection('chat_sessions')
     result = collection.get(ids=[cache_id])
@@ -447,7 +781,7 @@ def get_cached_response(messages_json: str) -> Optional[str]:
     return None
 
 def store_cached_response(messages_json: str, response_str: str):
-    """Store response in cache"""
+    """Store response in cache."""
     cache_id = f"cache-{generate_cache_key(messages_json)}"
     collection = client.get_collection('chat_sessions')
     collection.delete(ids=[cache_id])
@@ -461,12 +795,11 @@ def store_cached_response(messages_json: str, response_str: str):
     )
 
 # -------------------------------------------------------------------------
-# Session Management
+# Session management
 # -------------------------------------------------------------------------
-
 @app.get("/sessions")
 async def get_sessions():
-    """Get all chat sessions"""
+    """Get all chat sessions."""
     try:
         collection = client.get_collection('chat_sessions')
         result = collection.get()
@@ -492,7 +825,7 @@ async def get_sessions():
 
 @app.get("/sessions/{session_id}")
 async def get_session(session_id: str):
-    """Get a specific chat session"""
+    """Get a specific chat session."""
     try:
         collection = client.get_collection('chat_sessions')
         result = collection.get(ids=[session_id])
@@ -515,7 +848,7 @@ async def get_session(session_id: str):
 
 @app.post("/sessions")
 async def create_session(request: Request):
-    """Create or update a chat session"""
+    """Create or update a chat session."""
     try:
         data = await request.json()
         session_id = data.get('id')
@@ -553,7 +886,7 @@ async def create_session(request: Request):
 
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
-    """Delete a chat session"""
+    """Delete a chat session."""
     try:
         collection = client.get_collection('chat_sessions')
         collection.delete(ids=[session_id])
@@ -565,7 +898,7 @@ async def delete_session(session_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------------------------------------------------------------
-# MAIN
+# Main entry point
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
     print(f"Starting ChromaDB server on {CHROMA_HOST}:{CHROMA_PORT}...")
@@ -575,9 +908,9 @@ if __name__ == "__main__":
     if is_port_in_use(CHROMA_PORT):
         print(f"Port {CHROMA_PORT} is already in use. Attempting to kill existing process...")
         if kill_process_on_port(CHROMA_PORT):
-            print("Successfully killed existing process")
+            print("Successfully killed existing process.")
         else:
-            print("Failed to kill existing process")
+            print("Failed to kill existing process.")
             sys.exit(1)
     
     uvicorn.run(app, host=CHROMA_HOST, port=CHROMA_PORT)

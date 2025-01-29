@@ -14,6 +14,24 @@ const CHROMA_HOST = process.env.CHROMA_HOST || 'localhost';
 const CHROMA_PORT = process.env.CHROMA_PORT || '8001';
 const CHROMA_URL = `http://${CHROMA_HOST}:${CHROMA_PORT}`;
 
+// Custom error classes for better error handling
+class InitializationError extends Error {
+  constructor(message, collection = null) {
+    super(message);
+    this.name = 'InitializationError';
+    this.collection = collection;
+  }
+}
+
+class SchemaVersionMismatchError extends InitializationError {
+  constructor(collection, expected, actual) {
+    super(`Schema version mismatch in ${collection}: expected ${expected}, got ${actual}`);
+    this.name = 'SchemaVersionMismatchError';
+    this.expected = expected;
+    this.actual = actual;
+  }
+}
+
 // Default collections in order of creation
 const CORE_COLLECTIONS = [
   {
@@ -66,43 +84,88 @@ async function isServerRunning() {
   }
 }
 
+async function checkServerReady() {
+  try {
+    const response = await fetch(`${CHROMA_URL}/ready`);
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Server not ready');
+    }
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    return false;
+  }
+}
+
 async function waitForServer() {
   console.log('Waiting for ChromaDB server...');
-  for (let i = 0; i < 30; i++) {
+  const maxAttempts = 60;
+  const waitTime = 1000;
+  
+  for (let i = 0; i < maxAttempts; i++) {
+    // First check basic connectivity
     if (await isServerRunning()) {
-      console.log('ChromaDB server is ready');
-      return true;
+      console.log('ChromaDB server is responding to heartbeat');
+      
+      // Then check full readiness
+      const readyStatus = await checkServerReady();
+      if (readyStatus) {
+        console.log('ChromaDB server is fully initialized:', readyStatus);
+        return readyStatus;
+      }
+      
+      if (i % 5 === 0) {
+        console.log('Waiting for collections to be fully initialized...');
+      }
     }
-    await wait(1000);
+    
+    await wait(waitTime);
+    if (i % 5 === 0) {
+      console.log(`Still waiting for ChromaDB server... (attempt ${i + 1}/${maxAttempts})`);
+    }
   }
-  throw new Error('Failed to connect to ChromaDB server');
+  throw new InitializationError('Server failed to become ready in time');
+}
+
+async function verifyCollection(collection) {
+  try {
+    const response = await fetch(`${CHROMA_URL}/collections/${collection.name}/get`);
+    if (!response.ok) {
+      throw new InitializationError(`Collection ${collection.name} not accessible`, collection.name);
+    }
+
+    // If collection has initial data, verify it exists
+    if (collection.initialData) {
+      const dataResponse = await fetch(
+        `${CHROMA_URL}/collections/${collection.name}/get?ids=${collection.initialData.ids.join(',')}`
+      );
+      if (!dataResponse.ok) {
+        throw new InitializationError(`Initial data not found in ${collection.name}`, collection.name);
+      }
+      const data = await dataResponse.json();
+      if (!data.ids || data.ids.length === 0) {
+        throw new InitializationError(`Initial data not found in ${collection.name}`, collection.name);
+      }
+    }
+
+    console.log(`Verified collection: ${collection.name}`);
+    return true;
+  } catch (error) {
+    if (error instanceof InitializationError) {
+      throw error;
+    }
+    throw new InitializationError(
+      `Failed to verify collection ${collection.name}: ${error.message}`,
+      collection.name
+    );
+  }
 }
 
 async function verifyCollections() {
   console.log('Verifying collections...');
   for (const collection of CORE_COLLECTIONS) {
-    try {
-      const response = await fetch(`${CHROMA_URL}/collections/${collection.name}/get`);
-      if (!response.ok) {
-        throw new Error(`Collection ${collection.name} not found or not accessible`);
-      }
-      console.log(`Verified collection: ${collection.name}`);
-
-      // If collection has initial data, verify it exists
-      if (collection.initialData) {
-        const dataResponse = await fetch(`${CHROMA_URL}/collections/${collection.name}/get?ids=${collection.initialData.ids.join(',')}`);
-        if (!dataResponse.ok) {
-          throw new Error(`Initial data not found in ${collection.name}`);
-        }
-        const data = await dataResponse.json();
-        if (!data.ids || data.ids.length === 0) {
-          throw new Error(`Initial data not found in ${collection.name}`);
-        }
-        console.log(`Verified initial data in ${collection.name}`);
-      }
-    } catch (error) {
-      throw new Error(`Failed to verify collection ${collection.name}: ${error.message}`);
-    }
+    await verifyCollection(collection);
   }
   console.log('All collections verified successfully');
 }
@@ -112,15 +175,27 @@ async function initialize() {
     console.log('Starting system initialization...');
 
     // Step 1: Wait for ChromaDB server to be ready
-    await waitForServer();
+    const serverStatus = await waitForServer();
+    console.log(`Server schema version: ${serverStatus.schema_version}`);
 
     // Step 2: Verify collections exist
     await verifyCollections();
 
     console.log('System initialization completed successfully!');
   } catch (error) {
-    console.error('Initialization failed:', error);
-    process.exit(1); // Exit if collections aren't ready - they should be created by start_chroma.py
+    if (error instanceof SchemaVersionMismatchError) {
+      console.error('Schema version mismatch detected:', error.message);
+      console.error('Expected:', error.expected, 'Got:', error.actual);
+      // Could trigger a schema migration here
+    } else if (error instanceof InitializationError) {
+      console.error('Initialization failed:', error.message);
+      if (error.collection) {
+        console.error('Failed collection:', error.collection);
+      }
+    } else {
+      console.error('Unexpected error:', error);
+    }
+    process.exit(1);
   }
 }
 

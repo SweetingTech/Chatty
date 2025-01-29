@@ -70,14 +70,27 @@ class LMStudioProvider implements LLMProvider {
           port: this.lmStudioPort
         })
       });
+
+      // Enhanced error handling
       if (!response.ok) {
-        const errorDetails = await response.text();
+        let errorDetails;
+        try {
+          const errorJson = await response.json();
+          errorDetails = errorJson.detail || await response.text();
+        } catch {
+          errorDetails = await response.text();
+        }
         throw new Error(`Failed to fetch models. HTTP ${response.status}: ${errorDetails}`);
       }
 
       const data = await response.json();
       console.log('Raw LM Studio models response:', data);
       
+      // Validate response structure
+      if (!data || !Array.isArray(data.data)) {
+        throw new Error('Invalid response format from models endpoint');
+      }
+
       // Clear existing configs
       this.modelConfigs = {};
       

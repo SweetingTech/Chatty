@@ -78,10 +78,29 @@ class ClaudeProvider implements LLMProvider {
     try {
       // Fetch available models from FastAPI
       const response = await fetch('http://localhost:8001/anthropic/models');
+      
+      if (!response.ok) {
+        let errorDetails;
+        try {
+          const errorJson = await response.json();
+          errorDetails = errorJson.detail || await response.text();
+        } catch {
+          errorDetails = await response.text();
+        }
+        throw new Error(`Failed to fetch Claude models. HTTP ${response.status}: ${errorDetails}`);
+      }
+
       const data = await response.json();
+      
+      // Validate response structure
+      if (!data || !Array.isArray(data.data)) {
+        throw new Error('Invalid response format from Claude models endpoint');
+      }
       
       // Update our models list with any new models from the API
       const apiModels = data.data.map((model: any) => model.id);
+      console.log('Available Claude models:', apiModels);
+
       for (const modelId of apiModels) {
         if (!this.modelConfigs[modelId]) {
           // Add new model with default capabilities
@@ -98,8 +117,14 @@ class ClaudeProvider implements LLMProvider {
       
       // Update models list
       this.models = Object.keys(this.modelConfigs);
+
+      if (this.models.length === 0) {
+        throw new Error('No models available in Claude');
+      }
+
+      console.log('Claude provider initialized with models:', this.models);
     } catch (error) {
-      console.error('Failed to fetch Claude models:', error);
+      console.error('Failed to initialize Claude provider:', error);
       throw error;
     }
   }
@@ -162,29 +187,46 @@ class ClaudeProvider implements LLMProvider {
       // Convert messages to Claude format
       const claudeMessages = this.convertToClaudeMessages(messages);
 
+      // Prepare request payload
+      const payload = {
+        messages: claudeMessages,
+        model,
+        temperature: config?.temperature ?? 0.7,
+        max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
+        tools: config?.tools,
+        tool_choice: config?.tool_choice,
+        response_format: modelConfig.supportsJson && config?.response_format ? config.response_format : undefined
+      };
+
+      console.log('Claude chat request payload:', payload);
+
       // Call FastAPI endpoint
       const response = await fetch('http://localhost:8001/llm/claude', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          messages: claudeMessages,
-          model,
-          temperature: config?.temperature ?? 0.7,
-          max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
-          tools: config?.tools,
-          tool_choice: config?.tool_choice,
-          response_format: modelConfig.supportsJson && config?.response_format ? config.response_format : undefined
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error);
+        let errorDetails;
+        try {
+          const errorJson = await response.json();
+          errorDetails = errorJson.detail || await response.text();
+        } catch {
+          errorDetails = await response.text();
+        }
+        throw new Error(`Claude API call failed. HTTP ${response.status}: ${errorDetails}`);
       }
 
       const result = await response.json();
+      console.log('Claude chat response:', result);
+
+      // Validate response format
+      if (!result.choices?.[0]?.message?.content) {
+        throw new Error('Invalid response format from Claude API');
+      }
 
       // Cache response if session ID is set
       if (this.currentSessionId) {

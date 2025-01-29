@@ -11,6 +11,7 @@ export interface LLMConfig {
   enabled: boolean;
   isDefault?: boolean;
   apiKey?: string;
+  availableModels?: string[];
 }
 
 export interface ServiceStatus {
@@ -156,6 +157,7 @@ export const llmConfigSchema = z.object({
   enabled: z.boolean(),
   isDefault: z.boolean().optional(),
   apiKey: z.string().optional(),
+  availableModels: z.array(z.string()).optional(),
 });
 
 export const agentPersonalitySchema = z.object({

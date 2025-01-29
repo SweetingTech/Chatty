@@ -35,6 +35,7 @@ export interface AppState {
   saveDraftSettings: () => Promise<void>;
   updateDraftSettings: (settings: Partial<Settings>) => void;
   hasDraftSettings: () => boolean;
+  getModelsForProvider: (provider: ProviderType) => string[];
 
   // Service Status
   serviceStatus: ServiceStatus;
@@ -126,6 +127,12 @@ export const useAppStore = create<AppState>((set, get) => {
     set((state) => ({ ...state, ...updates }));
     return updates;
   };
+  const getModelsForProvider = (provider: ProviderType): string[] => {
+    const state = getState();
+    const config = state.llmConfigs[provider];
+    return config?.availableModels || [];
+  };
+
   const storeState: AppState = {
     settings: {
       lmStudioUrl: VITE_LM_STUDIO_URL,
@@ -165,18 +172,30 @@ export const useAppStore = create<AppState>((set, get) => {
         enabled: true,
         isDefault: false,
         apiKey: VITE_OPENAI_API_KEY,
-        model: 'gpt-3.5-turbo-0125', // Updated to use the latest model
+        model: 'gpt-3.5-turbo-0125',
         temperature: 0.7,
         maxTokens: 2000,
+        availableModels: [
+          'gpt-3.5-turbo-0125',
+          'gpt-4-turbo-preview',
+          'gpt-4',
+          'gpt-4o-mini',
+          'o1',
+          'o1-mini'
+        ]
       },
       'claude': {
         provider: 'claude',
         enabled: true,
         isDefault: false,
         apiKey: VITE_CLAUDE_API_KEY,
-        model: 'claude-2',
+        model: 'claude-3-5-sonnet-latest',
         temperature: 0.7,
         maxTokens: 2000,
+        availableModels: [
+          'claude-3-5-sonnet-latest',
+          'claude-3-5-haiku-latest'
+        ]
       },
       'deepseek': {
         provider: 'deepseek',
@@ -186,6 +205,12 @@ export const useAppStore = create<AppState>((set, get) => {
         model: 'deepseek-chat',
         temperature: 0.7,
         maxTokens: 2000,
+        availableModels: [
+          'deepseek-coder-33b-instruct',
+          'deepseek-coder-6.7b-instruct',
+          'deepseek-chat',
+          'deepseek-chat-medium'
+        ]
       },
       'none': {
         provider: 'none',
@@ -193,6 +218,7 @@ export const useAppStore = create<AppState>((set, get) => {
         isDefault: false,
       },
     },
+    getModelsForProvider,
     updateSettings: async (newSettings: Partial<Settings>) => {
       try {
         // Save settings to ChromaDB

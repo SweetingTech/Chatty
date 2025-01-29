@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import type { Agent, Tool, LLMProvider, AgentPersonality } from '../types';
+import React, { useState, useEffect } from 'react';
+import type { Agent, Tool, ProviderType, AgentPersonality } from '../types';
+import { useAppStore } from '../store';
 
 interface AgentFormProps {
   agent?: Agent;
@@ -12,8 +13,44 @@ export function AgentForm({ agent, availableTools, onSubmit, onCancel }: AgentFo
   const [name, setName] = useState(agent?.name || '');
   const [description, setDescription] = useState(agent?.description || '');
   const [selectedTools, setSelectedTools] = useState<string[]>(agent?.tools || []);
-  const [llmProvider, setLLMProvider] = useState<LLMProvider>(agent?.llmConfig.provider || 'none');
+  const { llmConfigs } = useAppStore();
+  const [llmProvider, setLLMProvider] = useState<ProviderType>(agent?.llmConfig.provider || 'none');
   const [model, setModel] = useState(agent?.llmConfig.model || '');
+
+  // Get available models for the selected provider
+  const getModelsForProvider = (provider: ProviderType): string[] => {
+    switch (provider) {
+      case 'openai':
+        return [
+          'gpt-3.5-turbo-0125',
+          'gpt-4-turbo-preview',
+          'gpt-4'
+        ];
+      case 'claude':
+        return [
+          'claude-3-opus-20240229',
+          'claude-3-sonnet-20240229',
+          'claude-3-haiku-20240307'
+        ];
+      case 'deepseek':
+        return [
+          'deepseek-coder-33b-instruct',
+          'deepseek-coder-6.7b-instruct',
+          'deepseek-chat',
+          'deepseek-chat-medium'
+        ];
+      default:
+        return [];
+    }
+  };
+
+  // Update model when provider changes
+  useEffect(() => {
+    const models = getModelsForProvider(llmProvider);
+    if (models.length > 0 && !models.includes(model)) {
+      setModel(models[0]);
+    }
+  }, [llmProvider]);
   const [temperature, setTemperature] = useState(agent?.llmConfig.temperature?.toString() || '0.7');
   const [maxTokens, setMaxTokens] = useState(agent?.llmConfig.maxTokens?.toString() || '4096');
   const [type, setType] = useState(agent?.type || 'custom');
@@ -38,6 +75,7 @@ export function AgentForm({ agent, availableTools, onSubmit, onCancel }: AgentFo
         model: model || undefined,
         temperature: temperature ? parseFloat(temperature) : undefined,
         maxTokens: maxTokens ? parseInt(maxTokens, 10) : undefined,
+        enabled: true,
       },
       personality,
       config: {
@@ -101,14 +139,19 @@ export function AgentForm({ agent, availableTools, onSubmit, onCancel }: AgentFo
         <label className="block text-sm font-medium text-gray-700">LLM Provider</label>
         <select
           value={llmProvider}
-          onChange={(e) => setLLMProvider(e.target.value as LLMProvider)}
+          onChange={(e) => setLLMProvider(e.target.value as ProviderType)}
           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
         >
           <option value="none">None</option>
-          <option value="lm-studio">LM Studio</option>
-          <option value="openai">OpenAI</option>
-          <option value="claude">Claude</option>
-          <option value="deepseek">Deepseek</option>
+          {Object.entries(llmConfigs)
+            .filter(([key]) => key !== 'lm-studio' && key !== 'none')
+            .map(([key, config]) => (
+              <option key={key} value={key}>
+                {key === 'openai' ? 'OpenAI' :
+                 key === 'claude' ? 'Claude' :
+                 key === 'deepseek' ? 'Deepseek' : key}
+              </option>
+            ))}
         </select>
       </div>
 
@@ -116,12 +159,17 @@ export function AgentForm({ agent, availableTools, onSubmit, onCancel }: AgentFo
         <>
           <div>
             <label className="block text-sm font-medium text-gray-700">Model</label>
-            <input
-              type="text"
+            <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-            />
+            >
+              {getModelsForProvider(llmProvider).map(modelName => (
+                <option key={modelName} value={modelName}>
+                  {modelName}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="grid grid-cols-2 gap-4">

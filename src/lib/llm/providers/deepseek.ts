@@ -100,10 +100,29 @@ class DeepseekProvider implements LLMProvider {
     try {
       // Fetch available models from FastAPI
       const response = await fetch('http://localhost:8001/deepseek/models');
+      
+      if (!response.ok) {
+        let errorDetails;
+        try {
+          const errorJson = await response.json();
+          errorDetails = errorJson.detail || await response.text();
+        } catch {
+          errorDetails = await response.text();
+        }
+        throw new Error(`Failed to fetch Deepseek models. HTTP ${response.status}: ${errorDetails}`);
+      }
+
       const data = await response.json();
+      
+      // Validate response structure
+      if (!data || !Array.isArray(data.models)) {
+        throw new Error('Invalid response format from Deepseek models endpoint');
+      }
       
       // Update our models list with any new models from the API
       const apiModels = data.models.map((model: any) => model.id);
+      console.log('Available Deepseek models:', apiModels);
+
       for (const modelId of apiModels) {
         if (!this.modelConfigs[modelId]) {
           // Add new model with default capabilities
@@ -119,8 +138,14 @@ class DeepseekProvider implements LLMProvider {
       
       // Update models list
       this.models = Object.keys(this.modelConfigs);
+
+      if (this.models.length === 0) {
+        throw new Error('No models available in Deepseek');
+      }
+
+      console.log('Deepseek provider initialized with models:', this.models);
     } catch (error) {
-      console.error('Failed to fetch Deepseek models:', error);
+      console.error('Failed to initialize Deepseek provider:', error);
       throw error;
     }
   }
@@ -161,29 +186,46 @@ class DeepseekProvider implements LLMProvider {
       // Convert messages to OpenAI format
       const openaiMessages = this.convertToOpenAIMessages(messages);
 
+      // Prepare request payload
+      const payload = {
+        messages: openaiMessages,
+        model,
+        temperature: config?.temperature ?? 0.7,
+        max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
+        tools: config?.tools,
+        tool_choice: config?.tool_choice,
+        response_format: modelConfig.supportsJson && config?.response_format ? config.response_format : undefined
+      };
+
+      console.log('Deepseek chat request payload:', payload);
+
       // Call FastAPI endpoint
       const response = await fetch('http://localhost:8001/llm/deepseek', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          messages: openaiMessages,
-          model,
-          temperature: config?.temperature ?? 0.7,
-          max_tokens: config?.max_tokens ?? modelConfig.maxOutputTokens,
-          tools: config?.tools,
-          tool_choice: config?.tool_choice,
-          response_format: modelConfig.supportsJson && config?.response_format ? config.response_format : undefined
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error);
+        let errorDetails;
+        try {
+          const errorJson = await response.json();
+          errorDetails = errorJson.detail || await response.text();
+        } catch {
+          errorDetails = await response.text();
+        }
+        throw new Error(`Deepseek API call failed. HTTP ${response.status}: ${errorDetails}`);
       }
 
       const result = await response.json();
+      console.log('Deepseek chat response:', result);
+
+      // Validate response format
+      if (!result.choices?.[0]?.message?.content) {
+        throw new Error('Invalid response format from Deepseek API');
+      }
 
       // Cache response if session ID is set
       if (this.currentSessionId) {
