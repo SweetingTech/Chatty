@@ -1,0 +1,14 @@
+{
+  "ids": [
+    "test-tool-mod"
+  ],
+  "documents": [
+    "{\"targetId\":\"execute-command\",\"changes\":{\"config\":{\"customSetting\":true}}}"
+  ],
+  "metadatas": [
+    {
+      "timestamp": 1737922081322,
+      "type": "tool_modification"
+    }
+  ]
+}

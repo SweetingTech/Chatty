@@ -1,0 +1,14 @@
+{
+  "ids": [
+    "test-agent-mod"
+  ],
+  "documents": [
+    "{\"targetId\":\"chat-agent\",\"changes\":{\"config\":{\"customSetting\":true}}}"
+  ],
+  "metadatas": [
+    {
+      "timestamp": 1737922081322,
+      "type": "agent_modification"
+    }
+  ]
+}

@@ -5,45 +5,16 @@ node_modules/
 
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
+*.pyc
 venv/
-.env/
-.venv/
-ENV/
-develop-eggs/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
 
 # Testing
+cypress/screenshots/
 coverage/
-.coverage.*
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
+.coverage
 .nyc_output/
 
-# Production
+# Production builds
 dist/
 build/
 dist-ssr/
@@ -65,9 +36,6 @@ out/
 *.njsproj
 *.sln
 *.sw?
-*.swp
-*.swo
-*~
 
 # Debug logs
 npm-debug.log*
@@ -80,40 +48,18 @@ logs/
 # System files
 .DS_Store
 Thumbs.db
-*.pid
-*.sock
 
-# Local development
-*.local
-.cache/
-.parcel-cache/
-.history/
-.vite/
-
-# Database and data
+# Database and data files
 *.sqlite
 *.sqlite3
 *.db
-chroma_data/
-chroma_backup/
-.chroma/
-index_data/
+chroma_data/**/*.sqlite3
+chroma_data/**/*.bin
 
-# ChromaDB specific
-.chroma/
-chromadb/
-vectors/
-embeddings/
-
-# Local Netlify folder
-.netlify
+# Build caches
+.cache/
+.parcel-cache/
+.vite/
 
 # TypeScript
 *.tsbuildinfo
-.next
-.nuxt
-
-# Temporary
-.temp/
-.tmp/
-.cache/
