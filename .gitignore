@@ -2,31 +2,22 @@
 node_modules/
 .pnp/
 .pnp.js
+package-lock.json
 
-# Python
-__pycache__/
-*.pyc
-venv/
-
-# Testing
-cypress/screenshots/
-coverage/
-.coverage
-.nyc_output/
-
-# Production builds
+# Build outputs
 dist/
 build/
-dist-ssr/
-out/
+*.tsbuildinfo
 
-# Environment variables
+# Environment and config
 .env
 .env.local
 .env.*.local
-!.env.example
+.env.development
+.env.test
+.env.production
 
-# Editor directories and files
+# IDE and editor files
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
@@ -37,29 +28,28 @@ out/
 *.sln
 *.sw?
 
-# Debug logs
+# Logs
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
-logs/
-*.log
 
-# System files
-.DS_Store
-Thumbs.db
+# Testing and coverage
+coverage/
+.nyc_output/
 
 # Database and data files
 *.sqlite
 *.sqlite3
 *.db
-chroma_data/**/*.sqlite3
-chroma_data/**/*.bin
+weaviate_data/
 
-# Build caches
+# System files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
 .cache/
-.parcel-cache/
-.vite/
-
-# TypeScript
-*.tsbuildinfo
