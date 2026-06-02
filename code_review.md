@@ -5,7 +5,7 @@ A full code review was conducted covering the project configuration, state manag
 ## 1. Project Configuration & Setup
 
 - **Testing Environment (Jest)**:
-  - `ts-jest` is missing, causing `npm test` to fail immediately upon execution unless installed.
+  - `ts-jest` is configured in `jest.config.js` and listed in `package.json`; if `npm test` fails, it’s likely due to another configuration/runtime issue (after running `npm ci`).
   - The E2E or system integration tests (e.g. `tests/integration/mcp/system.test.ts`) are currently failing because an operation expecting to time out or show "Server not connected" is instead receiving "Operation test:operation is not allowed".
 - **Linting**:
   - Running `npm run lint` generates over 240 errors. Most of these are due to the usage of `any` types throughout TypeScript code instead of well-defined interfaces.
