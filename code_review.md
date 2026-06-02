@@ -34,7 +34,7 @@ A full code review was conducted covering the project configuration, state manag
 - **Hardcoded URLs**:
   - The API requests made from the frontend to the backend (e.g., `src/lib/llm/providers/openai.ts`) have hardcoded URLs (e.g., `http://localhost:8001/llm/openai`). These should be dynamically loaded using environment variables to support Dockerization or remote hosting.
 - **MCP Client Implementation**:
-  - In `src/lib/mcp/client.ts`, timeouts are implemented via a custom `Promise` and `setTimeout`. However, the execution logic placeholder never clears the timeout if the underlying operation rejects (memory leak). Additionally, when integrating the actual MCP server connection, proper cleanup methods will be required.
+  - In `src/lib/mcp/client.ts`, timeouts are implemented via a custom `Promise` and `setTimeout`. The timeout is cleared after the current placeholder `resolve()`; when adding real async execution (which may reject), ensure the timeout is cleared on both success and error paths (e.g., via a `finally`). Additionally, when integrating the actual MCP server connection, proper cleanup methods will be required.
 
 ## 5. Python Backend (`start_chroma.py`)
 
