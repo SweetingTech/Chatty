@@ -9,7 +9,7 @@ A full code review was conducted covering the project configuration, state manag
   - The E2E or system integration tests (e.g. `tests/integration/mcp/system.test.ts`) are currently failing because an operation expecting to time out or show "Server not connected" is instead receiving "Operation test:operation is not allowed".
 - **Linting**:
   - Running `npm run lint` generates over 240 errors. Most of these are due to the usage of `any` types throughout TypeScript code instead of well-defined interfaces.
-  - There is a problem finding the `@eslint/js` package, requiring an `npm install` fix, but even after that, strict typing is heavily bypassed.
+  - `@eslint/js` is already listed in `package.json`; if ESLint cannot resolve it locally, ensure dependencies are installed and the lockfile is in sync before investigating ESLint config/type issues.
 - **Vite Build**:
   - The build process is successful but complains about chunk sizes being over 500kB. Implementing dynamic imports and code splitting in the Vite config (or React Router) would improve load times.
 
