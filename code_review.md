@@ -38,9 +38,7 @@ A full code review was conducted covering the project configuration, state manag
 
 ## 5. Python Backend (`start_chroma.py`)
 
-- **Synchronous Await (OpenAI)**:
-  - In `forward_to_openai`, the client is instantiated as `client = OpenAI(...)` which is a synchronous client. The code then attempts to `await client.chat.completions.create(...)`. In Python `asyncio`, awaiting a synchronous function is an error.
-  - **Recommendation**: Replace `from openai import OpenAI` with `from openai import AsyncOpenAI` and instantiate it properly to support asynchronous execution.
+- **Synchronous Await (OpenAI & Claude)**:\n  - In `forward_to_openai` and `forward_to_claude`, the clients are instantiated as synchronous clients (`client = OpenAI(...)` and `client = Anthropic(...)`). The code then attempts to `await` their creation methods (`await client.chat.completions.create(...)` and `await client.completions.create(...)`). In Python `asyncio`, awaiting a synchronous function/method call raises a `TypeError` at runtime.\n  - **Recommendation**: Replace `from openai import OpenAI` with `from openai import AsyncOpenAI` and `from anthropic import Anthropic` with `from anthropic import AsyncAnthropic,` and instantiate them properly to support asynchronous execution.
 - **Streaming Logic**:
   - The `stream_provider_chat` function only has the streaming logic implemented for `lm-studio` via SSE (Server-Sent Events) lines starting with `data:`. For other providers, it abruptly raises a 400 error. If the frontend allows streaming for OpenAI/Claude, it will fail when reaching this endpoint.
 - **Mixed File Structure**:
