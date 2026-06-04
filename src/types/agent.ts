@@ -9,7 +9,7 @@ export interface AgentConfig {
   status: AgentStatus;
   mcpClient: MCPClient;
   tools: Tool[];
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface Agent {
@@ -23,15 +23,15 @@ export interface Agent {
 export interface AgentRequest {
   operation?: {
     toolName: string;
-    args: Record<string, any>;
+    args: Record<string, unknown>;
   };
-  payload?: any;
+  payload?: unknown;
 }
 
 export interface AgentResponse {
   success: boolean;
   message: string;
-  data?: any;
+  data?: unknown;
   error?: string;
   timestamp: string;
 }

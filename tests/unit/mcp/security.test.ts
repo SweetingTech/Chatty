@@ -14,7 +14,17 @@ describe('MCPSecurity', () => {
       findToolByName: jest.fn(),
     } as any;
 
+    // Reset the singleton instance for testing
+    // @ts-ignore
+    MCPSecurity.instance = undefined;
     security = MCPSecurity.getInstance(mockRegistry);
+    // Clear internal state for true isolation
+    // @ts-ignore
+    security.policies.clear();
+    // @ts-ignore
+    security.activeOperations.clear();
+    // @ts-ignore
+    security.operationHistory = [];
   });
 
   afterEach(() => {
@@ -100,8 +110,7 @@ describe('MCPSecurity', () => {
 
     it('fails validation for missing policy', async () => {
       security.removePolicy('test-server');
-      const result = await security.validateOperation('test-server', mockOperation);
-      expect(result).toBe(false);
+      await expect(security.validateOperation('test-server', mockOperation)).rejects.toThrow('No security policy defined for server test-server');
     });
 
     it('fails validation for disallowed operation', async () => {
@@ -116,7 +125,7 @@ describe('MCPSecurity', () => {
       // Perform operations up to the limit
       for (let i = 0; i < mockPolicy.rateLimits.operations; i++) {
         await security.validateOperation('test-server', mockOperation);
-        security.trackOperationStart('test-server', mockOperation);
+        security.trackOperationStart('test-server', { ...mockOperation, toolName: `test:operation-rate-${i}` });
       }
 
       // Next operation should fail
@@ -128,7 +137,7 @@ describe('MCPSecurity', () => {
       // Start max concurrent operations
       for (let i = 0; i < mockPolicy.maxConcurrentOperations; i++) {
         await security.validateOperation('test-server', mockOperation);
-        security.trackOperationStart('test-server', mockOperation);
+        security.trackOperationStart('test-server', { ...mockOperation, toolName: `test:operation-concurrent-${i}` });
       }
 
       // Next operation should fail

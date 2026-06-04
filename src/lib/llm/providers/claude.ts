@@ -17,6 +17,10 @@ interface ModelConfig {
   supportsReasoning: boolean;
 }
 
+const CHROMA_PORT = import.meta.env.CHROMA_PORT || '8001';
+const CHROMA_HOST = import.meta.env.CHROMA_HOST || 'localhost';
+const CHROMA_URL = `http://${CHROMA_HOST}:${CHROMA_PORT}`;
+
 class ClaudeProvider implements LLMProvider {
   public id = 'claude';
   public name = 'Anthropic Claude';
@@ -77,7 +81,7 @@ class ClaudeProvider implements LLMProvider {
   public async initialize(): Promise<void> {
     try {
       // Fetch available models from FastAPI
-      const response = await fetch('http://localhost:8001/anthropic/models');
+      const response = await fetch(`${CHROMA_URL}/llm/claude/models`);
       
       if (!response.ok) {
         let errorDetails;
@@ -201,7 +205,7 @@ class ClaudeProvider implements LLMProvider {
       console.log('Claude chat request payload:', payload);
 
       // Call FastAPI endpoint
-      const response = await fetch('http://localhost:8001/llm/claude', {
+      const response = await fetch(`${CHROMA_URL}/llm/claude`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -270,7 +274,7 @@ class ClaudeProvider implements LLMProvider {
       const claudeMessages = this.convertToClaudeMessages(messages);
 
       // Call FastAPI streaming endpoint
-      const response = await fetch('http://localhost:8001/llm/claude', {
+      const response = await fetch(`${CHROMA_URL}/llm/claude`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

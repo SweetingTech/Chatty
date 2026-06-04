@@ -89,8 +89,8 @@ export interface MCPRegistry {
   listServerConfigs(): Map<string, MCPServerConfig>;
   
   updateServerStatus(serverName: string, status: MCPServerStatus): void;
-  getServerStatus(serverName: string): (MCPServerStatus & { lastPing: number }) | undefined;
-  listServerStatus(): Map<string, MCPServerStatus & { lastPing: number }>;
+  getServerStatus(serverName: string): MCPServerStatus | undefined;
+  listServerStatus(): Map<string, MCPServerStatus>;
   
   getAvailableTools(serverName: string): MCPTool[];
   findToolByName(toolName: string): { server: string; tool: MCPTool } | undefined;

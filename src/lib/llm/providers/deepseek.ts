@@ -17,6 +17,10 @@ interface ModelConfig {
   supportsJson: boolean;
 }
 
+const CHROMA_PORT = import.meta.env.CHROMA_PORT || '8001';
+const CHROMA_HOST = import.meta.env.CHROMA_HOST || 'localhost';
+const CHROMA_URL = `http://${CHROMA_HOST}:${CHROMA_PORT}`;
+
 class DeepseekProvider implements LLMProvider {
   public id = 'deepseek';
   public name = 'Deepseek';
@@ -99,7 +103,7 @@ class DeepseekProvider implements LLMProvider {
   public async initialize(): Promise<void> {
     try {
       // Fetch available models from FastAPI
-      const response = await fetch('http://localhost:8001/deepseek/models');
+      const response = await fetch(`${CHROMA_URL}/llm/deepseek/models`);
       
       if (!response.ok) {
         let errorDetails;
@@ -200,7 +204,7 @@ class DeepseekProvider implements LLMProvider {
       console.log('Deepseek chat request payload:', payload);
 
       // Call FastAPI endpoint
-      const response = await fetch('http://localhost:8001/llm/deepseek', {
+      const response = await fetch(`${CHROMA_URL}/llm/deepseek`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -258,7 +262,7 @@ class DeepseekProvider implements LLMProvider {
       const openaiMessages = this.convertToOpenAIMessages(messages);
 
       // Call FastAPI streaming endpoint
-      const response = await fetch('http://localhost:8001/llm/deepseek', {
+      const response = await fetch(`${CHROMA_URL}/llm/deepseek`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

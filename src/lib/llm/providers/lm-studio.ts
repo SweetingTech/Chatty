@@ -36,7 +36,7 @@ class LMStudioProvider implements LLMProvider {
   private currentModel: string = '';
   private currentSessionId: string | null = null;
   private onModelUpdate?: (modelId: string) => void;
-  private fastApiUrl = 'http://localhost:8001';
+  private fastApiUrl = `http://${import.meta.env.CHROMA_HOST || 'localhost'}:${import.meta.env.CHROMA_PORT || '8001'}`;
   private lmStudioHost: string;
   private lmStudioPort: string;
 

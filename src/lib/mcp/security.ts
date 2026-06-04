@@ -52,7 +52,7 @@ export class MCPSecurity {
     // Check policy exists
     const policy = this.policies.get(serverName);
     if (!policy) {
-      return false;
+      throw new Error(`No security policy defined for server ${serverName}`);
     }
 
     // Check operation is allowed
@@ -119,7 +119,8 @@ export class MCPSecurity {
 
   // Operation Tracking
   public trackOperationStart(serverName: string, operation: MCPOperation): void {
-    const key = `${serverName}:${operation.toolName}`;
+    const key = `${serverName}:${operation.toolName}:${Date.now()}:${Math.random()}`;
+    (operation as any)._securityKey = key;
     this.activeOperations.add(key);
     this.operationHistory.push({
       serverName,
@@ -129,7 +130,7 @@ export class MCPSecurity {
   }
 
   public trackOperationEnd(serverName: string, operation: MCPOperation): void {
-    const key = `${serverName}:${operation.toolName}`;
+    const key = (operation as any)._securityKey || `${serverName}:${operation.toolName}`;
     this.activeOperations.delete(key);
   }
 
