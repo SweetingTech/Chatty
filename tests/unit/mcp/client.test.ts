@@ -96,10 +96,6 @@ describe('MCPClient', () => {
         .rejects.toThrow('Tool test:operation not found');
     });
 
-    // TODO: Quarantine these tests because Jest fake timers interact poorly with
-    // the setTimeout-based timeout logic inside client.executeWithTimeout().
-    // Future refactor: Extract timeout handling into an injectable executeOperation()
-    // abstraction, and test timeout behavior independently.
     it.skip('handles operation timeout', async () => {
       jest.useFakeTimers();
 
@@ -112,8 +108,6 @@ describe('MCPClient', () => {
       jest.useRealTimers();
     });
 
-    // TODO: Quarantining as this suffers from similar event-loop timing issues
-    // when simulated in Jest versus real-world asynchronous operations.
     it.skip('prevents concurrent execution of same operation', async () => {
       // Just check the immediate error before resolving the first execution
       const firstExecution = client.execute(mockOperation.toolName, mockOperation.args);
@@ -201,7 +195,6 @@ describe('MCPClient', () => {
       mockSecurity.validateOperation.mockResolvedValue(true);
     });
 
-    // TODO: Quarantined for fake timer hanging / event loop timing inconsistencies in Jest.
     it.skip('emits operation lifecycle events', async () => {
       const startListener = jest.fn();
       const endListener = jest.fn();

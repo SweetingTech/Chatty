@@ -15,7 +15,7 @@ describe('MCPSecurity', () => {
     } as any;
 
     // Reset the singleton instance for testing
-    // @ts-ignore
+    // @ts-expect-error Resetting private singleton instance
     MCPSecurity.instance = undefined;
     security = MCPSecurity.getInstance(mockRegistry);
     // Clear internal state for true isolation

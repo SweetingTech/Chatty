@@ -69,20 +69,19 @@ export const createToolSlice: StateCreator<AppState, [], [], ToolSlice> = (set, 
 
     // Deep compare draft with base tool
     const diff = Object.keys(draft).reduce((acc, key) => {
-      const k = key as keyof Tool;
-      const draftVal = draft[k];
-      const baseVal = baseTool[k];
+      const draftVal = (draft as any)[key];
+      const baseVal = (baseTool as any)[key];
 
       // Handle nested objects/arrays
       if (typeof draftVal === 'object' && draftVal !== null) {
         if (JSON.stringify(draftVal) !== JSON.stringify(baseVal)) {
-          acc[k] = draftVal;
+          acc[key] = draftVal;
         }
       } else if (draftVal !== baseVal) {
-        acc[k] = draftVal;
+        acc[key] = draftVal;
       }
       return acc;
-    }, {} as Record<keyof Tool | string, unknown>);
+    }, {} as Record<string, any>);
 
     return Object.keys(diff).length > 0;
   },

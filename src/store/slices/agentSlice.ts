@@ -69,20 +69,19 @@ export const createAgentSlice: StateCreator<AppState, [], [], AgentSlice> = (set
 
     // Deep compare draft with base agent
     const diff = Object.keys(draft).reduce((acc, key) => {
-      const k = key as keyof Agent;
-      const draftVal = draft[k];
-      const baseVal = baseAgent[k];
+      const draftVal = (draft as any)[key];
+      const baseVal = (baseAgent as any)[key];
 
       // Handle nested objects/arrays
       if (typeof draftVal === 'object' && draftVal !== null) {
         if (JSON.stringify(draftVal) !== JSON.stringify(baseVal)) {
-          acc[k] = draftVal;
+          acc[key] = draftVal;
         }
       } else if (draftVal !== baseVal) {
-        acc[k] = draftVal;
+        acc[key] = draftVal;
       }
       return acc;
-    }, {} as Record<keyof Agent | string, unknown>);
+    }, {} as Record<string, any>);
 
     return Object.keys(diff).length > 0;
   },

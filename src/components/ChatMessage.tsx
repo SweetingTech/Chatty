@@ -37,8 +37,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
                 remarkPlugins={[remarkGfm]}
                 components={{
                   code(props) {
-                    // eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/no-explicit-any
-                    const {children, className, node, ref, ...rest} = props as any;
+                    const {children, className, node: _node, ref: _ref, ...rest} = props as any;
                     const match = /language-(\w+)/.exec(className || '');
                     return match ? (
                       <SyntaxHighlighter

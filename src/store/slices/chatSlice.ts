@@ -3,6 +3,7 @@ import type { AppState } from '../index';
 import type { ChatSession } from '../../types';
 import { chromadb } from '../../lib/chromadb';
 import { weaviateService } from '../../lib/weaviate';
+import type { ChromaChatSession } from '../../lib/chromadb/types';
 
 export interface ChatSlice {
   currentChatId: string | null;

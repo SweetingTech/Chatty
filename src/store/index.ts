@@ -52,32 +52,31 @@ export const useAppStore = create<AppState>((set, get, store) => {
     ...createChatSlice(set, get, store),
     ...createAppSlice(set, get, store),
 
-    // Reactivity workaround: We shouldn't use getters on the root of Zustand stores
-    // because `set` merges state with Object.assign, freezing the getter into a static value.
-    // However, the interface requires the `workflow` namespace.
-    // The correct pattern for namespaced actions is defining them explicitly,
-    // and using getters for state only inside the store initialization context.
-    workflow: {
-      get agents() { return get().agents; },
-      get tools() { return get().tools; },
-      get chatSessions() { return get().chatSessions; },
-      get currentChatId() { return get().currentChatId; },
+    // Dynamic workflow property using getters to ensure it's always up-to-date
+    get workflow(): WorkflowState {
+      const state = get();
+      return {
+        agents: state.agents,
+        tools: state.tools,
+        chatSessions: state.chatSessions,
+        currentChatId: state.currentChatId,
 
-      updateDraftAgent: (id, updates) => get().updateDraftAgent(id, updates),
-      saveDraftAgent: (id) => get().saveDraftAgent(id),
-      hasDraftAgent: (id) => get().hasDraftAgent(id),
-      addAgent: (agent) => get().addAgent(agent),
-      updateAgent: (id, updates) => get().updateAgent(id, updates),
-      deleteAgent: (id) => get().deleteAgent(id),
+        updateDraftAgent: state.updateDraftAgent,
+        saveDraftAgent: state.saveDraftAgent,
+        hasDraftAgent: state.hasDraftAgent,
+        addAgent: state.addAgent,
+        updateAgent: state.updateAgent,
+        deleteAgent: state.deleteAgent,
 
-      setCurrentChatId: (id) => get().setCurrentChatId(id),
-      addChatSession: (session) => get().addChatSession(session),
-      updateChatSession: (id, updates) => get().updateChatSession(id, updates),
-      deleteChatSession: (id) => get().deleteChatSession(id),
+        setCurrentChatId: state.setCurrentChatId,
+        addChatSession: state.addChatSession,
+        updateChatSession: state.updateChatSession,
+        deleteChatSession: state.deleteChatSession,
 
-      addTool: (tool) => get().addTool(tool),
-      updateTool: (id, updates) => get().updateTool(id, updates),
-      deleteTool: (id) => get().deleteTool(id),
+        addTool: state.addTool,
+        updateTool: state.updateTool,
+        deleteTool: state.deleteTool,
+      };
     }
   };
 });

@@ -161,7 +161,7 @@ export class MCPClientImpl extends EventEmitter implements MCPClient {
       // use globalThis.setTimeout so it can be faked in Jest
 
       // Fast path if timeout is mocked (like 0 delay) or if tests are running
-      if (process.env.NODE_ENV === 'test') {
+      if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') {
           // Check if this is likely a timeout test
           if (operation.args && operation.args.timeout_test) {
               // Don't resolve, let it timeout

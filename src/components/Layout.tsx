@@ -1,8 +1,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { MessageSquare, Database, LayoutDashboard, Bot, PenTool as Tool, Terminal, Settings as SettingsIcon, Network, Globe, Sliders } from 'lucide-react';
+import { MessageSquare, Database, LayoutDashboard, Bot, PenTool as Tool, Terminal, Settings, Network, Globe, Sliders } from 'lucide-react';
 import { useAppStore } from '../store';
-import type { Settings } from '../types/settings';
 
 const navItems = [
   { path: '/', icon: MessageSquare, label: 'Chat' },
@@ -14,10 +13,10 @@ const navItems = [
   { path: '/apis', icon: Globe, label: 'APIs' },
   { path: '/mcp', icon: Network, label: 'MCP' },
   { path: '/cli', icon: Terminal, label: 'CLI' },
-  { path: '/settings', icon: SettingsIcon, label: 'Settings' },
+  { path: '/settings', icon: Settings, label: 'Settings' },
 ];
 
-const getSystemStatus = (settings: Settings, activeAgents: number) => {
+const getSystemStatus = (settings: any, activeAgents: number) => {
   if (!settings.lmStudioUrl && !settings.openaiKey && !settings.claudeKey) {
     return { color: 'text-red-500', message: 'No LLM configured' };
   }
@@ -37,7 +36,7 @@ function LayoutComponent({ children }: { children: React.ReactNode }) {
 
   const status = React.useMemo(() => 
     getSystemStatus(settings, activeAgents),
-    [settings, activeAgents]
+    [settings.lmStudioUrl, settings.openaiKey, settings.claudeKey, activeAgents]
   );
 
   return (
