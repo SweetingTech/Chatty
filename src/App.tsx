@@ -12,18 +12,21 @@ import { MCPPage } from './pages/MCPPage';
 import { CLIPage } from './pages/CLIPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { useAppStore } from './store';
-import { Loader2 } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 
 function App() {
-  const { initializeServices, serviceStatus } = useAppStore();
+  const { initializeServices } = useAppStore();
   const [isInitializing, setIsInitializing] = useState(true);
+  const [initError, setInitError] = useState<string | null>(null);
 
   useEffect(() => {
     const init = async () => {
       try {
+        setInitError(null);
         await initializeServices();
       } catch (error) {
         console.error('Failed to initialize services:', error);
+        setInitError(error instanceof Error ? error.message : 'Unknown initialization error');
       } finally {
         setIsInitializing(false);
       }
@@ -43,6 +46,37 @@ function App() {
           <p className="mt-1 text-sm text-gray-500">
             Please wait while we connect to required services
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (initError) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center max-w-md p-6 bg-white rounded-lg shadow-lg border border-red-100">
+          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-gray-900 mb-2">
+            Service Initialization Failed
+          </h2>
+          <p className="text-sm text-gray-600 mb-4">
+            The application failed to connect to required background services. Some features may be unavailable.
+          </p>
+          <div className="bg-red-50 text-red-700 text-sm p-3 rounded text-left font-mono mb-4 break-words">
+            {initError}
+          </div>
+          <button
+            onClick={() => {
+              setInitError(null);
+              setIsInitializing(true);
+              initializeServices()
+                .catch((e) => setInitError(e instanceof Error ? e.message : 'Error'))
+                .finally(() => setIsInitializing(false));
+            }}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+          >
+            Retry Connection
+          </button>
         </div>
       </div>
     );

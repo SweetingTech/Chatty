@@ -20,8 +20,8 @@ interface ModelConfig {
 
 type OpenAIRole = 'system' | 'user' | 'assistant' | 'function';
 
-const CHROMA_PORT = import.meta.env.CHROMA_PORT || '8001';
-const CHROMA_HOST = import.meta.env.CHROMA_HOST || 'localhost';
+const CHROMA_PORT = import.meta.env.VITE_CHROMA_PORT || '8001';
+const CHROMA_HOST = import.meta.env.VITE_CHROMA_HOST || 'localhost';
 const CHROMA_URL = `http://${CHROMA_HOST}:${CHROMA_PORT}`;
 
 class OpenAIProvider implements LLMProvider {

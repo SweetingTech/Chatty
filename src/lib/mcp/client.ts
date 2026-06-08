@@ -83,12 +83,15 @@ export class MCPClientImpl extends EventEmitter implements MCPClient {
     const operation: MCPOperation = { toolName, args };
     const operationId = this.getOperationId(operation);
 
-    try {
-      // Check if operation is already in progress
-      if (this.pendingOperations.has(operationId)) {
-        throw new Error(`Operation ${toolName} is already in progress`);
-      }
+    // Check if operation is already in progress before async validation
+    if (this.pendingOperations.has(operationId)) {
+      throw new Error(`Operation ${toolName} is already in progress`);
+    }
 
+    // Mark as pending immediately to avoid async race conditions
+    this.pendingOperations.add(operationId);
+
+    try {
       // Get server status early to throw the correct error if not connected
       const serverStatus = this.registry.getServerStatus(this.config.serverName);
       if (!serverStatus?.connected) {
@@ -106,7 +109,6 @@ export class MCPClientImpl extends EventEmitter implements MCPClient {
       }
 
       // Track operation start
-      this.pendingOperations.add(operationId);
       this.security.trackOperationStart(this.config.serverName, operation);
 
       // Check auto-approval
@@ -158,33 +160,17 @@ export class MCPClientImpl extends EventEmitter implements MCPClient {
       // TODO: Implement actual execution logic
       // This would typically involve communicating with the MCP server
       // For now, we'll return a placeholder result after a short delay
-      // use globalThis.setTimeout so it can be faked in Jest
 
-      // Fast path if timeout is mocked (like 0 delay) or if tests are running
-      if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') {
-          // Check if this is likely a timeout test
-          if (operation.args && operation.args.timeout_test) {
-              // Don't resolve, let it timeout
-          } else {
-              globalThis.setTimeout(() => {
-                resolve({
-                  success: true,
-                  result: `Executed ${operation.toolName} with args ${JSON.stringify(operation.args)}`,
-                  timestamp: Date.now()
-                });
-                clearTimeout(timeoutId);
-              }, 10);
-          }
-      } else {
-        globalThis.setTimeout(() => {
-          resolve({
-            success: true,
-            result: `Executed ${operation.toolName} with args ${JSON.stringify(operation.args)}`,
-            timestamp: Date.now()
-          });
-          clearTimeout(timeoutId);
-        }, 50); // Small delay to allow concurrency to be tested
-      }
+      const executionDelay = typeof process !== 'undefined' && process.env?.NODE_ENV === 'test' ? 10 : 50;
+
+      globalThis.setTimeout(() => {
+        resolve({
+          success: true,
+          result: `Executed ${operation.toolName} with args ${JSON.stringify(operation.args)}`,
+          timestamp: Date.now()
+        });
+        clearTimeout(timeoutId);
+      }, executionDelay);
     });
   }
 

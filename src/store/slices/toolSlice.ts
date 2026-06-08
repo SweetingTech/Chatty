@@ -2,6 +2,7 @@ import { StateCreator } from 'zustand';
 import type { AppState } from '../index';
 import type { Tool } from '../../types';
 import { defaultTools } from '../../lib/tools/defaults';
+import { chromadb } from '../../lib/chromadb';
 
 export interface ToolSlice {
   tools: Tool[];
@@ -20,11 +21,42 @@ export const createToolSlice: StateCreator<AppState, [], [], ToolSlice> = (set, 
 
   addTool: (tool) => set((state) => ({ tools: [...state.tools, tool] })),
 
-  updateTool: (id, updates) => set((state) => ({
-    tools: state.tools.map((tool) =>
-      tool.id === id ? { ...tool, ...updates } : tool
-    )
-  })),
+  updateTool: async (id, updates) => {
+    const tool = get().tools.find((t) => t.id === id);
+    if (!tool) return;
+
+    const baseTool = defaultTools.find((t) => t.id === id);
+    if (baseTool) {
+      const updatedTool = { ...tool, ...updates };
+      const changes = Object.entries(updatedTool).reduce((acc, [key, value]) => {
+        const k = key as keyof Tool;
+        if (JSON.stringify(value) !== JSON.stringify(baseTool[k])) {
+          acc[k] = value;
+        }
+        return acc;
+      }, {} as Record<keyof Tool | string, unknown>);
+
+      if (Object.keys(changes).length > 0) {
+        try {
+          const collection = await chromadb.getOrCreateCollection('tool_modifications', {
+            description: 'Stores modifications to default tools',
+          });
+          await collection.add({
+            ids: [id],
+            metadatas: [{ timestamp: Date.now() }],
+            documents: [JSON.stringify({ targetId: id, changes })],
+          });
+        } catch (error) {
+          console.error('Failed to save tool modifications:', error);
+        }
+      }
+    }
+
+    set((state) => ({
+      tools: state.tools.map((t) => (t.id === id ? { ...t, ...updates } : t)),
+      draftTools: { ...state.draftTools, [id]: null },
+    }));
+  },
 
   deleteTool: (id) => set((state) => {
     const newDraftTools = { ...state.draftTools };

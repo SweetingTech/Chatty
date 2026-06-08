@@ -110,7 +110,8 @@ describe('MCPSecurity', () => {
 
     it('fails validation for missing policy', async () => {
       security.removePolicy('test-server');
-      await expect(security.validateOperation('test-server', mockOperation)).rejects.toThrow('No security policy defined for server test-server');
+      const result = await security.validateOperation('test-server', mockOperation);
+      expect(result).toBe(false);
     });
 
     it('fails validation for disallowed operation', async () => {

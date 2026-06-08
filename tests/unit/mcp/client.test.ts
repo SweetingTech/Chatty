@@ -96,19 +96,19 @@ describe('MCPClient', () => {
         .rejects.toThrow('Tool test:operation not found');
     });
 
-    it.skip('handles operation timeout', async () => {
-      jest.useFakeTimers();
+    it('handles operation timeout', async () => {
+      const fastTimeoutClient = new MCPClientImpl(
+        { ...mockConfig, timeout: 5 }, // VERY short timeout (5ms)
+        mockRegistry,
+        mockSecurity
+      );
 
-      const timeoutPromise = client.execute(mockOperation.toolName, { ...mockOperation.args, timeout_test: true });
+      const timeoutPromise = fastTimeoutClient.execute(mockOperation.toolName, mockOperation.args);
 
-      jest.runAllTimers(); // this will make sure globalThis.setTimeout and regular setTimeout hit
-
-      await expect(timeoutPromise).rejects.toThrow('Operation test:operation timed out');
-
-      jest.useRealTimers();
+      await expect(timeoutPromise).rejects.toThrow('Operation test:operation timed out after 5ms');
     });
 
-    it.skip('prevents concurrent execution of same operation', async () => {
+    it('prevents concurrent execution of same operation', async () => {
       // Just check the immediate error before resolving the first execution
       const firstExecution = client.execute(mockOperation.toolName, mockOperation.args);
 
@@ -195,7 +195,7 @@ describe('MCPClient', () => {
       mockSecurity.validateOperation.mockResolvedValue(true);
     });
 
-    it.skip('emits operation lifecycle events', async () => {
+    it('emits operation lifecycle events', async () => {
       const startListener = jest.fn();
       const endListener = jest.fn();
       

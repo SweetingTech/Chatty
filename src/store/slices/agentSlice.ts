@@ -2,6 +2,7 @@ import { StateCreator } from 'zustand';
 import type { AppState } from '../index';
 import type { Agent } from '../../types';
 import { defaultAgents } from '../../lib/agents/defaults';
+import { chromadb } from '../../lib/chromadb';
 
 export interface AgentSlice {
   agents: Agent[];
@@ -20,11 +21,42 @@ export const createAgentSlice: StateCreator<AppState, [], [], AgentSlice> = (set
 
   addAgent: (agent) => set((state) => ({ agents: [...state.agents, agent] })),
 
-  updateAgent: (id, updates) => set((state) => ({
-    agents: state.agents.map((agent) =>
-      agent.id === id ? { ...agent, ...updates } : agent
-    )
-  })),
+  updateAgent: async (id, updates) => {
+    const agent = get().agents.find((a) => a.id === id);
+    if (!agent) return;
+
+    const baseAgent = defaultAgents.find((a) => a.id === id);
+    if (baseAgent) {
+      const updatedAgent = { ...agent, ...updates };
+      const changes = Object.entries(updatedAgent).reduce((acc, [key, value]) => {
+        const k = key as keyof Agent;
+        if (JSON.stringify(value) !== JSON.stringify(baseAgent[k])) {
+          acc[k] = value;
+        }
+        return acc;
+      }, {} as Record<keyof Agent | string, unknown>);
+
+      if (Object.keys(changes).length > 0) {
+        try {
+          const collection = await chromadb.getOrCreateCollection('agent_modifications', {
+            description: 'Stores modifications to default agents',
+          });
+          await collection.add({
+            ids: [id],
+            metadatas: [{ timestamp: Date.now() }],
+            documents: [JSON.stringify({ targetId: id, changes })],
+          });
+        } catch (error) {
+          console.error('Failed to save agent modifications:', error);
+        }
+      }
+    }
+
+    set((state) => ({
+      agents: state.agents.map((a) => (a.id === id ? { ...a, ...updates } : a)),
+      draftAgents: { ...state.draftAgents, [id]: null },
+    }));
+  },
 
   deleteAgent: (id) => set((state) => {
     const newDraftAgents = { ...state.draftAgents };

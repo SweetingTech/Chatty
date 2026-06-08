@@ -1,19 +1,20 @@
 import { StateCreator } from 'zustand';
 import type { AppState } from '../index';
 import type { Settings, ProviderType, ServiceStatus, LLMConfig } from '../../types';
+import { chromadb } from '../../lib/chromadb';
 
 // Environment variables with proper typing
 const VITE_LM_STUDIO_HOST = (import.meta.env.VITE_LM_STUDIO_HOST as string) || 'localhost';
 const VITE_LM_STUDIO_PORT = (import.meta.env.VITE_LM_STUDIO_PORT as string) || '1234';
 const VITE_LM_STUDIO_URL = `http://${VITE_LM_STUDIO_HOST}:${VITE_LM_STUDIO_PORT}`;
 
-const WEAVIATE_HOST = (import.meta.env.WEAVIATE_HOST as string) || 'localhost';
-const WEAVIATE_PORT = (import.meta.env.WEAVIATE_PORT as string) || '8080';
+const WEAVIATE_HOST = (import.meta.env.VITE_WEAVIATE_HOST as string) || 'localhost';
+const WEAVIATE_PORT = (import.meta.env.VITE_WEAVIATE_PORT as string) || '8080';
 const WEAVIATE_URL = `http://${WEAVIATE_HOST}:${WEAVIATE_PORT}`;
-const WEAVIATE_API_KEY = (import.meta.env.WEAVIATE_API_KEY as string) || '';
-const WEAVIATE_SCHEMA_CLASS = (import.meta.env.WEAVIATE_SCHEMA_CLASS as string) || 'ChatSession';
-const WEAVIATE_BATCH_SIZE = parseInt((import.meta.env.WEAVIATE_BATCH_SIZE as string) || '100');
-const WEAVIATE_VECTORIZER_MODULE = (import.meta.env.WEAVIATE_VECTORIZER_MODULE as string) || 'text2vec-transformers';
+const WEAVIATE_API_KEY = (import.meta.env.VITE_WEAVIATE_API_KEY as string) || '';
+const WEAVIATE_SCHEMA_CLASS = (import.meta.env.VITE_WEAVIATE_SCHEMA_CLASS as string) || 'ChatSession';
+const WEAVIATE_BATCH_SIZE = parseInt((import.meta.env.VITE_WEAVIATE_BATCH_SIZE as string) || '100');
+const WEAVIATE_VECTORIZER_MODULE = (import.meta.env.VITE_WEAVIATE_VECTORIZER_MODULE as string) || 'text2vec-transformers';
 
 const VITE_OPENAI_API_KEY = (import.meta.env.VITE_OPENAI_API_KEY as string) || '';
 const VITE_CLAUDE_API_KEY = (import.meta.env.VITE_CLAUDE_API_KEY as string) || '';
@@ -57,9 +58,32 @@ export const createSettingsSlice: StateCreator<AppState, [], [], SettingsSlice> 
     defaultLLMProvider: 'none',
   },
   draftSettings: null,
-  updateSettings: (newSettings) => set((state) => ({
-    settings: { ...state.settings, ...newSettings }
-  })),
+  updateSettings: async (newSettings) => {
+    try {
+      await chromadb.saveUserSettings({
+        ...get().settings,
+        ...newSettings
+      });
+
+      set((state) => ({
+        settings: { ...state.settings, ...newSettings },
+        draftSettings: null,
+      }));
+
+      if ('openaiKey' in newSettings) {
+        get().updateLLMConfig('openai', { apiKey: newSettings.openaiKey });
+      }
+      if ('claudeKey' in newSettings) {
+        get().updateLLMConfig('claude', { apiKey: newSettings.claudeKey });
+      }
+      if ('deepseekKey' in newSettings) {
+        get().updateLLMConfig('deepseek', { apiKey: newSettings.deepseekKey as string });
+      }
+    } catch (error) {
+      console.error('Failed to save settings:', error);
+      throw error;
+    }
+  },
   updateDraftSettings: (updates) => set((state) => ({
     draftSettings: {
       ...(state.draftSettings || state.settings),

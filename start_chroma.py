@@ -20,7 +20,7 @@ import socket
 import psutil
 import sys
 import openai
-from openai import AsyncOpenAI, OpenAI
+from openai import AsyncOpenAI
 import anthropic
 from anthropic import Anthropic
 

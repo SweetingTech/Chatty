@@ -13,12 +13,14 @@ export class MCPSecurity {
   private policies: Map<string, MCPSecurityPolicy>;
   private activeOperations: Set<string>;
   private operationHistory: OperationRecord[];
+  private operationKeys: WeakMap<MCPOperation, string>;
 
   private constructor(registry: MCPRegistry) {
     this.registry = registry;
     this.policies = new Map();
     this.activeOperations = new Set();
     this.operationHistory = [];
+    this.operationKeys = new WeakMap();
   }
 
   public static getInstance(registry: MCPRegistry): MCPSecurity {
@@ -52,7 +54,7 @@ export class MCPSecurity {
     // Check policy exists
     const policy = this.policies.get(serverName);
     if (!policy) {
-      throw new Error(`No security policy defined for server ${serverName}`);
+      return false;
     }
 
     // Check operation is allowed
@@ -120,7 +122,7 @@ export class MCPSecurity {
   // Operation Tracking
   public trackOperationStart(serverName: string, operation: MCPOperation): void {
     const key = `${serverName}:${operation.toolName}:${Date.now()}:${Math.random()}`;
-    (operation as any)._securityKey = key;
+    this.operationKeys.set(operation, key);
     this.activeOperations.add(key);
     this.operationHistory.push({
       serverName,
@@ -130,8 +132,9 @@ export class MCPSecurity {
   }
 
   public trackOperationEnd(serverName: string, operation: MCPOperation): void {
-    const key = (operation as any)._securityKey || `${serverName}:${operation.toolName}`;
+    const key = this.operationKeys.get(operation) || `${serverName}:${operation.toolName}`;
     this.activeOperations.delete(key);
+    this.operationKeys.delete(operation);
   }
 
   // Cleanup

@@ -36,6 +36,9 @@ export const createChatSlice: StateCreator<AppState, [], [], ChatSlice> = (set, 
   },
 
   deleteChatSession: (id) => {
+    // Find session to get its documents BEFORE we delete it
+    const session = get().chatSessions.find(s => s.id === id);
+
     set((state) => ({
       chatSessions: state.chatSessions.filter((s) => s.id !== id),
       currentChatId: state.currentChatId === id ? null : state.currentChatId,
@@ -44,9 +47,6 @@ export const createChatSlice: StateCreator<AppState, [], [], ChatSlice> = (set, 
     // Perform async cleanup without waiting
     (async () => {
       try {
-        // Find session to get its documents
-        const state = get();
-        const session = state.chatSessions.find(s => s.id === id);
 
         // Delete from ChromaDB first
         await chromadb.deleteChatSession(id);

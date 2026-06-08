@@ -131,11 +131,11 @@ describe('MCP System Integration', () => {
       await expect(extraOperation).rejects.toThrow(/Operation.*not allowed/);
 
       // Original operations should complete
-      try {
-        await Promise.all(operations);
-      } catch (e) {
-        // ignore
-      }
+      const results = await Promise.all(operations);
+      expect(results).toHaveLength(policy.maxConcurrentOperations!);
+      results.forEach(result => {
+        expect(result.success).toBe(true);
+      });
     });
 
     it('handles server disconnection gracefully', async () => {
@@ -242,7 +242,7 @@ describe('MCP System Integration', () => {
       security.removePolicy('test-server');
 
       await expect(client.execute('test:operation', { param: 'value' }))
-        .rejects.toThrow('No security policy defined for server test-server');
+        .rejects.toThrow('Operation test:operation is not allowed');
     });
 
     it('handles client configuration errors', () => {
