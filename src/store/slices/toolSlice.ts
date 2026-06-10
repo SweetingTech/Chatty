@@ -3,6 +3,7 @@ import type { AppState } from '../index';
 import type { Tool } from '../../types';
 import { defaultTools } from '../../lib/tools/defaults';
 import { chromadb } from '../../lib/chromadb';
+import { chromadb } from '../../lib/chromadb';
 
 export interface ToolSlice {
   tools: Tool[];
