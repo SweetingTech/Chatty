@@ -7,6 +7,12 @@ describe('MCPRegistry', () => {
 
   beforeEach(() => {
     registry = MCPRegistry.getInstance();
+    // @ts-ignore: clearing state for true test isolation
+    registry.clients.clear();
+    // @ts-ignore: clearing state for true test isolation
+    registry.serverConfigs.clear();
+    // @ts-ignore: clearing state for true test isolation
+    registry.serverStatus.clear();
     mockClient = {
       name: 'test-client',
       callTool: jest.fn(),
@@ -80,7 +86,6 @@ describe('MCPRegistry', () => {
       registry.updateServerStatus('test-server', mockStatus);
       expect(registry.getServerStatus('test-server')).toEqual({
         ...mockStatus,
-        lastPing: expect.any(Number),
       });
     });
 
@@ -89,7 +94,6 @@ describe('MCPRegistry', () => {
       const statuses = registry.listServerStatus();
       expect(statuses.get('test-server')).toEqual({
         ...mockStatus,
-        lastPing: expect.any(Number),
       });
     });
   });

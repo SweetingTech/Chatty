@@ -20,6 +20,10 @@ interface ModelConfig {
 
 type OpenAIRole = 'system' | 'user' | 'assistant' | 'function';
 
+const CHROMA_PORT = import.meta.env.VITE_CHROMA_PORT || '8001';
+const CHROMA_HOST = import.meta.env.VITE_CHROMA_HOST || 'localhost';
+const CHROMA_URL = `http://${CHROMA_HOST}:${CHROMA_PORT}`;
+
 class OpenAIProvider implements LLMProvider {
   public id = 'openai';
   public name = 'OpenAI';
@@ -192,7 +196,7 @@ class OpenAIProvider implements LLMProvider {
       const openaiMessages = this.convertToOpenAIMessages(messages);
 
       // Call FastAPI endpoint
-      const response = await fetch('http://localhost:8001/llm/openai', {
+      const response = await fetch(`${CHROMA_URL}/llm/openai`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -257,7 +261,7 @@ class OpenAIProvider implements LLMProvider {
       const openaiMessages = this.convertToOpenAIMessages(messages);
 
       // Call FastAPI streaming endpoint
-      const response = await fetch('http://localhost:8001/llm/openai', {
+      const response = await fetch(`${CHROMA_URL}/llm/openai`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

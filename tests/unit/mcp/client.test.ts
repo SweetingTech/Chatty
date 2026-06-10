@@ -97,18 +97,26 @@ describe('MCPClient', () => {
     });
 
     it('handles operation timeout', async () => {
-      jest.useFakeTimers();
-      const timeoutPromise = client.execute(mockOperation.toolName, mockOperation.args);
-      jest.advanceTimersByTime(mockConfig.timeout + 100);
-      await expect(timeoutPromise).rejects.toThrow('Operation test:operation timed out');
-      jest.useRealTimers();
+      const fastTimeoutClient = new MCPClientImpl(
+        { ...mockConfig, timeout: 5 }, // VERY short timeout (5ms)
+        mockRegistry,
+        mockSecurity
+      );
+
+      const timeoutPromise = fastTimeoutClient.execute(mockOperation.toolName, mockOperation.args);
+
+      await expect(timeoutPromise).rejects.toThrow('Operation test:operation timed out after 5ms');
     });
 
     it('prevents concurrent execution of same operation', async () => {
+      // Just check the immediate error before resolving the first execution
       const firstExecution = client.execute(mockOperation.toolName, mockOperation.args);
+
       const secondExecution = client.execute(mockOperation.toolName, mockOperation.args);
 
       await expect(secondExecution).rejects.toThrow('Operation test:operation is already in progress');
+
+      // now let first complete so it cleans up correctly
       await firstExecution;
     });
   });

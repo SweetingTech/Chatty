@@ -20,7 +20,7 @@ import socket
 import psutil
 import sys
 import openai
-from openai import OpenAI
+from openai import AsyncOpenAI
 import anthropic
 from anthropic import Anthropic
 
@@ -530,9 +530,10 @@ async def forward_to_lm_studio(data: dict) -> dict:
 
 async def forward_to_openai(data: dict) -> dict:
     """Forward request to OpenAI API and return response."""
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=OPENAI_API_KEY)
     response = await client.chat.completions.create(**data)
-    return response
+    # The response from AsyncOpenAI might be a pydantic model, convert to dict
+    return response.model_dump() if hasattr(response, 'model_dump') else response
 
 async def forward_to_claude(data: dict) -> dict:
     """Forward request to Claude API with proper transformation"""
@@ -597,8 +598,8 @@ async def list_models(provider: str):
                 response.raise_for_status()
                 return response.json()
         elif provider == "openai":
-            client = OpenAI(api_key=OPENAI_API_KEY)
-            models = client.models.list()
+            client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+            models = await client.models.list()
             return {"models": [{"id": model.id} for model in models.data]}
         elif provider == "claude":
             return {
@@ -754,9 +755,21 @@ async def stream_provider_chat(provider: str, data: dict):
                         # For SSE-like messages, lines often begin with "data: "
                         if line.startswith('data: '):
                             yield line + '\n'
+        elif provider == "openai":
+            client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+            data["stream"] = True
+            stream = await client.chat.completions.create(**data)
+            async for chunk in stream:
+                yield f"data: {chunk.model_dump_json()}\n\n"
+        elif provider == "claude":
+            client = anthropic.AsyncAnthropic(api_key=CLAUDE_API_KEY)
+            claude_payload = ProviderRequestTransformer.prepare_claude_payload(data)
+            claude_payload["stream"] = True
+            async with client.messages.stream(**claude_payload) as stream:
+                async for event in stream:
+                    yield f"data: {json.dumps({'type': event.type, 'event': event.model_dump() if hasattr(event, 'model_dump') else event})}\n\n"
         else:
-            # If needed, implement streaming for openai/claude/deepseek similarly.
-            raise HTTPException(status_code=400, detail="Streaming not supported for this provider.")
+            raise HTTPException(status_code=400, detail=f"Streaming not supported for provider '{provider}'.")
     except httpx.ReadTimeout:
         yield f"data: {json.dumps({'error': 'Stream timed out. The model may still be loading or generating.'})}\n\n"
     except HTTPException as e:

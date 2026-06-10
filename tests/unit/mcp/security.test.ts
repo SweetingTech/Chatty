@@ -14,7 +14,17 @@ describe('MCPSecurity', () => {
       findToolByName: jest.fn(),
     } as any;
 
+    // Reset the singleton instance for testing
+    // @ts-expect-error Resetting private singleton instance
+    MCPSecurity.instance = undefined;
     security = MCPSecurity.getInstance(mockRegistry);
+    // Clear internal state for true isolation
+    // @ts-ignore
+    security.policies.clear();
+    // @ts-ignore
+    security.activeOperations.clear();
+    // @ts-ignore
+    security.operationHistory = [];
   });
 
   afterEach(() => {
@@ -116,7 +126,7 @@ describe('MCPSecurity', () => {
       // Perform operations up to the limit
       for (let i = 0; i < mockPolicy.rateLimits.operations; i++) {
         await security.validateOperation('test-server', mockOperation);
-        security.trackOperationStart('test-server', mockOperation);
+        security.trackOperationStart('test-server', { ...mockOperation, toolName: `test:operation-rate-${i}` });
       }
 
       // Next operation should fail
@@ -128,7 +138,7 @@ describe('MCPSecurity', () => {
       // Start max concurrent operations
       for (let i = 0; i < mockPolicy.maxConcurrentOperations; i++) {
         await security.validateOperation('test-server', mockOperation);
-        security.trackOperationStart('test-server', mockOperation);
+        security.trackOperationStart('test-server', { ...mockOperation, toolName: `test:operation-concurrent-${i}` });
       }
 
       // Next operation should fail

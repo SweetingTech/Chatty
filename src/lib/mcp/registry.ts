@@ -4,7 +4,7 @@ export class MCPRegistry {
   private static instance: MCPRegistry;
   private clients: Map<string, MCPClient>;
   private serverConfigs: Map<string, MCPServerConfig>;
-  private serverStatus: Map<string, MCPServerStatus & { lastPing: number }>;
+  private serverStatus: Map<string, MCPServerStatus>;
 
   private constructor() {
     this.clients = new Map();
@@ -59,16 +59,15 @@ export class MCPRegistry {
   // Server Status
   public updateServerStatus(serverName: string, status: MCPServerStatus): void {
     this.serverStatus.set(serverName, {
-      ...status,
-      lastPing: Date.now()
+      ...status
     });
   }
 
-  public getServerStatus(serverName: string): (MCPServerStatus & { lastPing: number }) | undefined {
+  public getServerStatus(serverName: string): MCPServerStatus | undefined {
     return this.serverStatus.get(serverName);
   }
 
-  public listServerStatus(): Map<string, MCPServerStatus & { lastPing: number }> {
+  public listServerStatus(): Map<string, MCPServerStatus> {
     return new Map(this.serverStatus);
   }
 

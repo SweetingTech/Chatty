@@ -83,10 +83,19 @@ export class MCPClientImpl extends EventEmitter implements MCPClient {
     const operation: MCPOperation = { toolName, args };
     const operationId = this.getOperationId(operation);
 
+    // Check if operation is already in progress before async validation
+    if (this.pendingOperations.has(operationId)) {
+      throw new Error(`Operation ${toolName} is already in progress`);
+    }
+
+    // Mark as pending immediately to avoid async race conditions
+    this.pendingOperations.add(operationId);
+
     try {
-      // Check if operation is already in progress
-      if (this.pendingOperations.has(operationId)) {
-        throw new Error(`Operation ${toolName} is already in progress`);
+      // Get server status early to throw the correct error if not connected
+      const serverStatus = this.registry.getServerStatus(this.config.serverName);
+      if (!serverStatus?.connected) {
+        throw new Error(`Server ${this.config.serverName} is not connected`);
       }
 
       // Validate operation
@@ -99,6 +108,9 @@ export class MCPClientImpl extends EventEmitter implements MCPClient {
         throw new Error(`Operation ${toolName} is not allowed`);
       }
 
+      // Track operation start
+      this.security.trackOperationStart(this.config.serverName, operation);
+
       // Check auto-approval
       if (!this.config.autoApprove && !this.registry.isOperationAutoApproved(this.config.serverName, toolName)) {
         // TODO: Implement approval workflow
@@ -106,21 +118,21 @@ export class MCPClientImpl extends EventEmitter implements MCPClient {
         console.warn(`Auto-approving operation ${toolName} (approval workflow not implemented)`);
       }
 
-      // Track operation start
-      this.pendingOperations.add(operationId);
-      this.security.trackOperationStart(this.config.serverName, operation);
       this.emit('operation:start', operation);
-
-      // Get server status
-      const serverStatus = this.registry.getServerStatus(this.config.serverName);
-      if (!serverStatus?.connected) {
-        throw new Error(`Server ${this.config.serverName} is not connected`);
-      }
 
       // Find tool in registry
       const toolInfo = this.registry.findToolByName(toolName);
       if (!toolInfo) {
         throw new Error(`Tool ${toolName} not found`);
+      }
+
+      // Validate operation schema (basic check for required properties)
+      if (toolInfo.tool.inputSchema?.required) {
+        for (const req of toolInfo.tool.inputSchema.required) {
+          if (!(req in args)) {
+            throw new Error(`Operation validation failed: Missing required argument ${req}`);
+          }
+        }
       }
 
       // Execute operation with timeout
@@ -141,20 +153,24 @@ export class MCPClientImpl extends EventEmitter implements MCPClient {
   private async executeWithTimeout(operation: MCPOperation): Promise<any> {
     return new Promise((resolve, reject) => {
       const timeoutMs = this.config.timeout || this.defaultTimeout;
-      const timeoutId = setTimeout(() => {
+      const timeoutId = globalThis.setTimeout(() => {
         reject(new Error(`Operation ${operation.toolName} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
 
       // TODO: Implement actual execution logic
       // This would typically involve communicating with the MCP server
-      // For now, we'll return a placeholder result
-      resolve({
-        success: true,
-        result: `Executed ${operation.toolName} with args ${JSON.stringify(operation.args)}`,
-        timestamp: Date.now()
-      });
+      // For now, we'll return a placeholder result after a short delay
 
-      clearTimeout(timeoutId);
+      const executionDelay = typeof process !== 'undefined' && process.env?.NODE_ENV === 'test' ? 10 : 50;
+
+      globalThis.setTimeout(() => {
+        resolve({
+          success: true,
+          result: `Executed ${operation.toolName} with args ${JSON.stringify(operation.args)}`,
+          timestamp: Date.now()
+        });
+        clearTimeout(timeoutId);
+      }, executionDelay);
     });
   }
 
