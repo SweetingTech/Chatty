@@ -2,6 +2,7 @@ import { StateCreator } from 'zustand';
 import type { AppState } from '../index';
 import type { Settings, ProviderType, ServiceStatus, LLMConfig } from '../../types';
 import { chromadb } from '../../lib/chromadb';
+import { chromadb } from '../../lib/chromadb';
 
 // Environment variables with proper typing
 const VITE_LM_STUDIO_HOST = (import.meta.env.VITE_LM_STUDIO_HOST as string) || 'localhost';
