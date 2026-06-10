@@ -3,6 +3,7 @@ import type { AppState } from '../index';
 import type { Agent } from '../../types';
 import { defaultAgents } from '../../lib/agents/defaults';
 import { chromadb } from '../../lib/chromadb';
+import { chromadb } from '../../lib/chromadb';
 
 export interface AgentSlice {
   agents: Agent[];
